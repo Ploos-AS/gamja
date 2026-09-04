@@ -132,6 +132,29 @@ jobs:
           grep -qi '^Upgrade: websocket' "$headers"
           grep -qi '^Connection: upgrade' "$headers"
 
+      - name: Security scan runtime image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: image
+          image-ref: gamja:smoke
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Security scan repository
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: fs
+          scan-ref: .
+          scanners: secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4, Node 24
@@ -209,4 +232,6 @@ jobs:
           echo "BuildKit: \`v0.32.2@sha256:28a898719c18a33f...\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Dockerfile frontend: \`docker/dockerfile:1.7@sha256:a57df69d...\`" >> "$GITHUB_STEP_SUMMARY"
           echo "SBOM generator: \`docker/buildkit-syft-scanner@sha256:ae4f3b55...\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Trivy: \`v0.74.0\`, action v0.36.0 pinned at \`ed142fd...\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Security gate: fixable HIGH/CRITICAL runtime CVEs + HIGH/CRITICAL repo secret/misconfiguration findings" >> "$GITHUB_STEP_SUMMARY"
           echo "Provenance: mode=max" >> "$GITHUB_STEP_SUMMARY"
