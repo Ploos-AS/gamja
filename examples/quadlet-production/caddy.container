@@ -19,7 +19,6 @@ HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3
 HealthStartPeriod=10s
-NoNewPrivileges=true
 
 [Service]
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do podman healthcheck run gamja >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
