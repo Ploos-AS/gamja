@@ -1,6 +1,6 @@
 # Production Compose deployment
 
-This is the M1.4 reference deployment for an Internet-facing Gamja + soju installation.
+This is the M1.4+ production reference deployment for an Internet-facing Gamja + soju installation, with the M1.6 operations baseline.
 
 ## Layout
 
@@ -34,6 +34,20 @@ Create the initial soju administrator after the stack is healthy:
 docker compose exec soju sojudb -config /etc/soju/config create-user <username> -admin
 docker compose restart soju
 ```
+
+## Operations baseline
+
+M1.6 adds bounded local logging, resource guardrails and explicit shutdown windows:
+
+| Service | CPU | Memory | PIDs | Stop grace |
+| --- | ---: | ---: | ---: | ---: |
+| soju | 1 CPU | 256 MiB | 256 | 30s |
+| Gamja | 0.5 CPU | 128 MiB | 128 | 15s |
+| Caddy | 1 CPU | 256 MiB | 256 | 30s |
+
+Docker logs use `json-file` rotation with 10 MiB per file and three files per service. These values are a small-installation baseline, not fixed sizing requirements; tune them from observed workload.
+
+See `OPERATIONS.md` for status, logs, health, resource inspection, restart/recovery, upgrade and incident-triage commands.
 
 ## Supply-chain pins
 
@@ -116,13 +130,13 @@ Then verify browser login and a WebSocket-backed IRC connection.
 
 ## Security
 
-Gamja and soju do not publish host ports in this stack. All browser traffic enters through Caddy over HTTPS/WSS. Gamja retains its read-only root filesystem and `/tmp` tmpfs model. All three services use `no-new-privileges`.
+Gamja and soju do not publish host ports in this stack. All browser traffic enters through Caddy over HTTPS/WSS. Gamja retains its read-only root filesystem and `/tmp` tmpfs model. All three Compose services use `no-new-privileges`.
 
 OAuth2 values emitted into Gamja's `/config.json` are visible to the browser. `GAMJA_OAUTH2_CLIENT_SECRET` must therefore not be treated as a private server-side secret.
 
 ## Validation
 
-M1.4 CI verifies the production dependency pins and starts an equivalent three-service stack with Caddy internal TLS. It proves:
+CI verifies the production dependency pins and starts an equivalent three-service stack with Caddy internal TLS. It proves:
 
 - pinned soju and Caddy OCI indexes resolve
 - soju -> Gamja -> Caddy health ordering
@@ -133,3 +147,4 @@ M1.4 CI verifies the production dependency pins and starts an equivalent three-s
 - persistent soju and Caddy volume wiring
 - backup archive creation and checksums
 - destructive restore recovers a marker from `soju-data`
+- M1.6 Compose resource, logging and shutdown policy renders correctly
