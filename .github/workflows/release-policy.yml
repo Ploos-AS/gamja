@@ -68,10 +68,29 @@ jobs:
           release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
           test "$attest_line" -lt "$release_line"
 
+      - name: Qualify M1.14 release evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-release-evidence.sh
+          export TAG=v1.2.3 VERSION=1.2.3 IMAGE=ghcr.io/ploos-as/gamja:1.2.3
+          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          ./scripts/create-release-evidence.sh /tmp/evidence-a.json
+          ./scripts/create-release-evidence.sh /tmp/evidence-b.json
+          cmp /tmp/evidence-a.json /tmp/evidence-b.json
+          jq -e --arg digest "$DIGEST" --arg commit "$RELEASE_COMMIT" '.digest == $digest and .release_commit == $commit and .platforms == ["linux/amd64","linux/arm64"] and .verification.signature_verified and .verification.attestations_verified' /tmp/evidence-a.json >/dev/null
+          grep -Fq 'Generate M1.14 release evidence' .github/workflows/release.yml
+          grep -Fq '/tmp/release-evidence.json.sha256' .github/workflows/release.yml
+          grep -Fq '/tmp/release-evidence.json' .github/workflows/release.yml
+          evidence_line=$(grep -n 'Generate M1.14 release evidence' .github/workflows/release.yml | cut -d: -f1)
+          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
+          test "$evidence_line" -lt "$release_line"
+
       - name: Record release policy
         run: |
           {
-            echo "### M1.8 + M1.12 + M1.13 release integrity qualification"
+            echo "### M1.8 + M1.12 + M1.13 + M1.14 release integrity qualification"
             echo
             echo "- strict OCI-compatible SemVer release tags"
             echo "- annotated/lightweight tag commit must equal successful container workflow commit"
@@ -79,5 +98,6 @@ jobs:
             echo "- exact OCI release digest must have a valid Cosign keyless signature"
             echo "- signature identity is restricted to this repository's container workflow on a version tag"
             echo "- SPDX SBOM and current BuildKit SLSA provenance must validate for amd64 and arm64"
-            echo "- GitHub Release creation occurs only after signature and attestation verification"
+            echo "- deterministic release evidence binds tag, commit and exact OCI digest"
+            echo "- release evidence JSON and SHA-256 checksum are attached only after all gates pass"
           } >> "$GITHUB_STEP_SUMMARY"
