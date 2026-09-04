@@ -2,16 +2,22 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <image@sha256:digest>" >&2
+  echo "usage: $0 <image@sha256:digest> [linux/amd64|linux/arm64]" >&2
   exit 2
 }
 
-[ "$#" -eq 1 ] || usage
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
 image_ref="$1"
+platform="${2:-linux/amd64}"
 
 case "$image_ref" in
   *@sha256:????????????????????????????????????????????????????????????????) ;;
   *) echo "image reference must be digest-bound: $image_ref" >&2; exit 2 ;;
+esac
+
+case "$platform" in
+  linux/amd64|linux/arm64) ;;
+  *) echo "unsupported runtime platform: $platform" >&2; exit 2 ;;
 esac
 
 for cmd in docker curl grep; do
@@ -19,7 +25,8 @@ for cmd in docker curl grep; do
 done
 
 soju_image='ghcr.io/ploos-as/soju:latest@sha256:ae1eb58d75beea7bfbeff3f004700289f2fcd4c56da671d88216f2cfb2d1d491'
-suffix="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$"
+platform_slug="${platform//\//-}"
+suffix="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${platform_slug}-$$"
 network="gamja-release-runtime-$suffix"
 gamja_container="gamja-release-runtime-$suffix"
 soju_container="soju-release-runtime-$suffix"
@@ -37,7 +44,7 @@ cleanup() {
 trap cleanup EXIT
 
 fail() {
-  echo "release runtime qualification failed: $*" >&2
+  echo "release runtime qualification failed on $platform: $*" >&2
   docker inspect "$gamja_container" >/dev/null 2>&1 && docker logs "$gamja_container" >&2 || true
   docker inspect "$soju_container" >/dev/null 2>&1 && docker logs "$soju_container" >&2 || true
   exit 1
@@ -51,14 +58,16 @@ EOF
 # fixture contains no secret and must be readable through the read-only bind.
 chmod 0644 "$soju_config"
 
-# Pull the immutable release identity explicitly. The CI runner is amd64; the
-# multi-platform index digest selects the amd64 manifest for the runtime gate.
-docker pull --platform linux/amd64 "$image_ref" >/dev/null
-docker pull --platform linux/amd64 "$soju_image" >/dev/null
+# Pull the immutable multi-platform index identity explicitly, selecting the
+# requested platform manifest. linux/arm64 is expected to run under registered
+# binfmt/QEMU when the host runner is amd64.
+docker pull --platform "$platform" "$image_ref" >/dev/null
+docker pull --platform "$platform" "$soju_image" >/dev/null
 
 docker network create "$network" >/dev/null
 
 docker run -d \
+  --platform "$platform" \
   --name "$soju_container" \
   --network "$network" \
   --network-alias soju \
@@ -69,6 +78,7 @@ docker run -d \
   "$soju_image" -config /etc/soju/release-runtime.conf >/dev/null
 
 docker run -d \
+  --platform "$platform" \
   --name "$gamja_container" \
   --network "$network" \
   --read-only \
@@ -86,7 +96,7 @@ grep -q 'no-new-privileges' <<<"$security_opts" || fail "no-new-privileges missi
 
 # Wait for nginx/health without publishing a host port; probe from the same
 # network using the container IP so the exact release image remains isolated.
-for _ in $(seq 1 30); do
+for _ in $(seq 1 45); do
   health="$(docker inspect --format '{{.State.Health.Status}}' "$gamja_container")"
   [ "$health" = "healthy" ] && break
   [ "$health" != "unhealthy" ] || fail "container health became unhealthy"
@@ -103,9 +113,9 @@ curl --fail --silent --show-error "http://$gamja_ip:8080/config.json" >"$config_
 grep -q '<title>gamja IRC client</title>' "$index_file" || fail "Gamja index title mismatch"
 grep -q '"url": "/socket"' "$config_file" || fail "generated config does not target /socket"
 
-# A real RFC 6455 upgrade through Gamja/nginx to soju proves the release
-# artifact's built-in /socket proxy path, not merely static-file serving.
-curl --http1.1 --max-time 2 --silent --show-error \
+# A real RFC 6455 upgrade through Gamja/nginx to soju proves the selected
+# platform artifact's built-in /socket proxy path, not merely static serving.
+curl --http1.1 --max-time 3 --silent --show-error \
   -D "$headers_file" -o "$body_file" \
   -H 'Connection: Upgrade' \
   -H 'Upgrade: websocket' \
@@ -119,7 +129,7 @@ grep -qi '^Connection: upgrade' "$headers_file" || fail "WebSocket Connection up
 
 echo "release_runtime=verified"
 echo "image=$image_ref"
-echo "platform=linux/amd64"
+echo "platform=$platform"
 echo "user=101"
 echo "read_only=true"
 echo "health=healthy"
