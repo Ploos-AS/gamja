@@ -13,7 +13,7 @@ Environment=SOJU_PORT=8080
 Environment=GAMJA_SERVER_URL=/socket
 ReadOnly=true
 Tmpfs=/tmp
-AddCapability=NET_BIND_SERVICE
+PodmanArgs=--sysctl=net.ipv4.ip_unprivileged_port_start=0
 NoNewPrivileges=true
 HealthCmd=wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1
 HealthInterval=30s
