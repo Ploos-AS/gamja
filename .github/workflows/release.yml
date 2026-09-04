@@ -104,6 +104,24 @@ jobs:
           ./scripts/verify-attestations.sh "ghcr.io/ploos-as/gamja@$DIGEST"
           echo 'M1.13 release gate: SPDX SBOM and BuildKit SLSA provenance verified for amd64 and arm64.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Generate M1.14 release evidence
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          RELEASE_COMMIT: ${{ steps.meta.outputs.release_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-release-evidence.sh
+          ./scripts/create-release-evidence.sh /tmp/release-evidence.json
+          (cd /tmp && sha256sum release-evidence.json > release-evidence.json.sha256)
+          (cd /tmp && sha256sum -c release-evidence.json.sha256)
+          jq -e --arg digest "$DIGEST" --arg commit "$RELEASE_COMMIT" '.digest == $digest and .release_commit == $commit and .verification.signature_verified and .verification.attestations_verified' /tmp/release-evidence.json >/dev/null
+          echo 'M1.14 release evidence generated and checksummed for the exact verified OCI digest.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
         env:
@@ -133,6 +151,7 @@ jobs:
           - SPDX SBOM and BuildKit SLSA provenance (mode=max), verified for both platforms
           - OCI revision annotation verified against the exact release tag commit
           - Cosign keyless signature verified for the exact release digest before GitHub Release creation
+          - machine-readable M1.14 release evidence plus SHA-256 checksum attached to this release
 
           Container image:
           \`$IMAGE\`
@@ -143,4 +162,10 @@ jobs:
           Release commit:
           \`$RELEASE_COMMIT\`
           EOF
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Gamja container $TAG" --notes-file /tmp/release-notes.md --verify-tag
+          gh release create "$TAG" \
+            /tmp/release-evidence.json \
+            /tmp/release-evidence.json.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Gamja container $TAG" \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag
