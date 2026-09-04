@@ -19,6 +19,8 @@ services:
     environment:
       SOJU_HOST: soju
       SOJU_PORT: 8080
+      GAMJA_SERVER_URL: /socket
+      GAMJA_AUTH: optional
     ports:
       - "8080:8080"
     read_only: true
