@@ -19,10 +19,11 @@ A release candidate must satisfy all of the following on `main`:
 - OCI revision metadata is bound to the exact Git commit built by the workflow
 - the published OCI digest is keylessly signed by the repository's `container` workflow using GitHub Actions OIDC
 - SPDX SBOM and BuildKit SLSA provenance are present and structurally valid for linux/amd64 and linux/arm64
+- deterministic release evidence binds the tag, release commit and exact verified OCI digest
 
-M1.7 security policy is documented in `SECURITY.md`, M1.10 dependency policy in `DEPENDENCIES.md`, M1.11 signing trust in `SIGNING.md`, and M1.13 attestation policy in `ATTESTATIONS.md`.
+M1.7 security policy is documented in `SECURITY.md`, M1.10 dependency policy in `DEPENDENCIES.md`, M1.11 signing trust in `SIGNING.md`, M1.13 attestation policy in `ATTESTATIONS.md`, and M1.14 evidence policy in `RELEASE-EVIDENCE.md`.
 
-M1.8 binds the release tag, successful container workflow commit, and OCI revision to the same Git commit. M1.12 extends that chain to the exact Cosign-signed OCI digest. M1.13 further requires that the same digest expose valid SPDX SBOM and BuildKit SLSA provenance attestations for both supported platforms before GitHub Release creation.
+M1.8 binds the release tag, successful container workflow commit, and OCI revision to the same Git commit. M1.12 extends that chain to the exact Cosign-signed OCI digest. M1.13 further requires that the same digest expose valid SPDX SBOM and BuildKit SLSA provenance attestations for both supported platforms before GitHub Release creation. M1.14 records those already-verified facts in deterministic machine-readable release assets.
 
 ## Versioning
 
@@ -51,20 +52,22 @@ Stable releases publish full version plus major/minor aliases. `latest` is publi
 8. installs the SHA-pinned Cosign verifier
 9. verifies the exact digest against GitHub Actions OIDC and the tag-scoped `container.yml` workflow identity
 10. verifies SPDX SBOM and BuildKit SLSA provenance on the exact digest for amd64 and arm64
-11. creates the matching GitHub Release only after every integrity, signature and attestation gate succeeds
+11. generates and validates deterministic `release-evidence.json` plus its SHA-256 checksum
+12. creates the matching GitHub Release with both evidence files attached only after every integrity, signature and attestation gate succeeds
 
 The workflow is idempotent: an existing GitHub Release is not replaced.
 
-`.github/workflows/release-policy.yml` continuously qualifies the strict tag validator, M1.8 revision wiring, M1.12 Cosign identity constraints, M1.13 attestation wiring, and ordering of all verification before release creation.
+`.github/workflows/release-policy.yml` continuously qualifies the strict tag validator, M1.8 revision wiring, M1.12 Cosign identity constraints, M1.13 attestation wiring, M1.14 deterministic evidence generation, and ordering of all verification before release creation.
 
 ## Release steps
 
-1. Confirm all `main` qualification workflows are green, including `attestations`.
+1. Confirm all `main` qualification workflows are green, including `attestations` and `release-policy`.
 2. Confirm `main` is the intended release state.
 3. Create the annotated version tag from that exact commit.
 4. Wait for the tag-triggered `container` workflow to build, scan, publish, sign and self-verify the exact digest.
 5. The release workflow independently verifies tag -> workflow commit -> OCI revision -> signed digest -> SBOM/provenance attestations.
-6. Only then is the GitHub Release created.
-7. Verify the GitHub Release, versioned image, platforms, OCI revision, signature, SPDX SBOM and BuildKit provenance.
+6. It generates deterministic release evidence for that verified identity and checksum.
+7. Only then is the GitHub Release created with `release-evidence.json` and `release-evidence.json.sha256` attached.
+8. Verify the GitHub Release, evidence checksum, versioned image, platforms, OCI revision, signature, SPDX SBOM and BuildKit provenance.
 
 Published tags are immutable release artifacts. Fixes require a new semantic version.
