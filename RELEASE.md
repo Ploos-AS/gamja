@@ -25,8 +25,6 @@ Releases use semantic version tags:
 vMAJOR.MINOR.PATCH
 ```
 
-The first release is `v0.1.0`.
-
 A `v0.1.0` tag publishes these aliases:
 
 ```text
@@ -35,16 +33,30 @@ ghcr.io/ploos-as/gamja:0.1
 ghcr.io/ploos-as/gamja:0
 ```
 
-`latest` is published only from the default branch and remains the continuously qualified `main` image.
+`latest` is published by the container workflow and remains the continuously qualified default image.
+
+## Automated GitHub releases
+
+`.github/workflows/release.yml` listens for successful completion of the `container` workflow. It only proceeds when the triggering ref is a semantic-version tag matching `vMAJOR.MINOR.PATCH` (with optional SemVer pre-release/build suffix).
+
+For an eligible successful tag build, the release workflow:
+
+1. verifies that the Git tag exists;
+2. resolves the published OCI index digest directly from GHCR;
+3. creates a GitHub Release for the existing immutable tag;
+4. records the image reference, OCI digest, release commit, supported architectures, SBOM and provenance status;
+5. exits cleanly if that GitHub Release already exists.
+
+This keeps GitHub Releases downstream of the qualified container build instead of racing the registry publication.
 
 ## Release steps
 
 1. Confirm the latest `main` workflow completed successfully.
-2. Confirm the worktree/repository state represented by `main` is the intended release state.
-3. Create the annotated release tag from that exact `main` commit.
-4. Wait for the tag workflow to complete successfully.
-5. Record the published OCI index digest in the GitHub release notes.
-6. Verify the tagged manifest contains linux/amd64 and linux/arm64.
-7. Verify SBOM and provenance attestations are attached to the published image.
+2. Confirm the repository state represented by `main` is the intended release state.
+3. Create an annotated semantic-version tag from that exact `main` commit.
+4. Push the tag.
+5. The `container` workflow builds, qualifies and publishes the tagged multi-architecture image.
+6. After the container workflow succeeds, `release.yml` automatically creates the GitHub Release and records the registry digest.
+7. Verify the tagged manifest contains linux/amd64 and linux/arm64 and that SBOM/provenance attestations are present.
 
 Published tags are immutable release artifacts. Fixes after publication require a new semantic version.
