@@ -63,11 +63,14 @@ Resource guardrails are:
 
 These are small-installation defaults, not sizing guarantees. Adjust them after observing real usage.
 
+Podman 4.9.3 supports Quadlet's native `LogDriver=` and `PidsLimit=` keys but not the newer `Memory=` key. To keep Ubuntu 24.04 compatibility, the reference units therefore pass the memory ceiling through `PodmanArgs=--memory=...`; the generated container still receives the same cgroup memory limit. CPU is bounded with systemd `CPUQuota=`.
+
 Inspect systemd policy and live Podman state:
 
 ```sh
 systemctl status soju.service gamja.service caddy.service
-systemctl show soju.service gamja.service caddy.service -p CPUQuotaPerSecUSec -p MemoryMax
+systemctl show soju.service gamja.service caddy.service -p CPUQuotaPerSecUSec
+sudo podman inspect --format 'memory={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}} log={{.HostConfig.LogConfig.Type}}' soju gamja gamja-caddy
 sudo podman stats
 ```
 
