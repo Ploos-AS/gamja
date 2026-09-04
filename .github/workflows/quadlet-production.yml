@@ -123,24 +123,34 @@ jobs:
           set -euo pipefail
           old_id="$(sudo podman inspect --format '{{.Id}}' gamja)"
           sudo podman kill gamja
-          for i in {1..30}; do
-            if systemctl is-active --quiet gamja.service && sudo podman inspect gamja >/dev/null 2>&1; then
-              new_id="$(sudo podman inspect --format '{{.Id}}' gamja)"
-              if [ "$new_id" != "$old_id" ]; then
-                break
-              fi
+
+          new_id=""
+          for i in {1..60}; do
+            candidate="$(sudo podman inspect --type container --format '{{.Id}}' gamja 2>/dev/null || true)"
+            if [ -n "$candidate" ] && [ "$candidate" != "$old_id" ] && systemctl is-active --quiet gamja.service; then
+              new_id="$candidate"
+              break
             fi
             sleep 1
           done
-          new_id="$(sudo podman inspect --format '{{.Id}}' gamja)"
+          test -n "$new_id"
           test "$new_id" != "$old_id"
+
+          status=""
           for i in {1..60}; do
-            status="$(sudo podman inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' gamja)"
+            status="$(sudo podman inspect --type container --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' gamja 2>/dev/null || true)"
             [ "$status" = healthy ] && break
             sleep 1
           done
-          test "$(sudo podman inspect --format '{{.State.Health.Status}}' gamja)" = healthy
-          curl -kfsS https://localhost/ | grep -q '<title>gamja IRC client</title>'
+          test "$status" = healthy
+
+          for i in {1..30}; do
+            if curl -kfsS https://localhost/ | grep -q '<title>gamja IRC client</title>'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
 
       - name: Diagnostics
         if: failure()
