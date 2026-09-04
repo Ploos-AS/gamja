@@ -15,8 +15,8 @@ Volume=/etc/gamja/Caddyfile:/etc/caddy/Caddyfile:ro,Z
 Volume=caddy-data.volume:/data
 Volume=caddy-config.volume:/config
 LogDriver=journald
-Memory=256m
 PidsLimit=256
+PodmanArgs=--memory=256m
 HealthCmd=wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1
 HealthInterval=30s
 HealthTimeout=5s
