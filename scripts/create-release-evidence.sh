@@ -38,7 +38,7 @@ jq -n \
     signature: {
       scheme: "cosign-keyless",
       oidc_issuer: "https://token.actions.githubusercontent.com",
-      workflow_identity: "https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/tags/" + $tag
+      workflow_identity: ("https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/tags/" + $tag)
     },
     attestations: {
       sbom: "SPDX",
