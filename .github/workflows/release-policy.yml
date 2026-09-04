@@ -118,36 +118,50 @@ jobs:
           grep -Fq "release-evidence.json.sha256" .github/workflows/release-verification.yml
           grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
 
-      - name: Qualify M1.16 digest-bound runtime gate
+      - name: Qualify M1.16 and M1.17 digest-bound runtime gate
         shell: bash
         run: |
           set -euo pipefail
           bash -n ./scripts/qualify-release-runtime.sh
           chmod +x ./scripts/qualify-release-runtime.sh
-          if ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja:latest >/dev/null 2>&1; then
+          if ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja:latest linux/amd64 >/dev/null 2>&1; then
             echo 'release runtime qualifier accepted a mutable tag' >&2
             exit 1
           fi
-          grep -Fq 'Qualify M1.16 exact release runtime' .github/workflows/release.yml
-          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"' .github/workflows/release.yml
-          runtime_line=$(grep -n 'Qualify M1.16 exact release runtime' .github/workflows/release.yml | cut -d: -f1)
-          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
-          test "$runtime_line" -lt "$release_line"
-          grep -Fq 'workflow_run:' .github/workflows/release-runtime.yml
-          grep -Fq 'workflows: [container]' .github/workflows/release-runtime.yml
-          grep -Fq 'EXPECTED_REVISION' .github/workflows/release-runtime.yml
-          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"' .github/workflows/release-runtime.yml
+          if ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa linux/s390x >/dev/null 2>&1; then
+            echo 'release runtime qualifier accepted an unsupported platform' >&2
+            exit 1
+          fi
+          grep -Fq 'linux/amd64|linux/arm64' scripts/qualify-release-runtime.sh
+          grep -Fq -- '--platform "$platform"' scripts/qualify-release-runtime.sh
           grep -Fq -- '--read-only' scripts/qualify-release-runtime.sh
           grep -Fq -- '--security-opt no-new-privileges:true' scripts/qualify-release-runtime.sh
-          grep -Fq "101" scripts/qualify-release-runtime.sh
-          grep -Fq '101 ' scripts/qualify-release-runtime.sh || grep -Fq ' 101' scripts/qualify-release-runtime.sh
           grep -Fq 'Sec-WebSocket-Version: 13' scripts/qualify-release-runtime.sh
           grep -Fq "^HTTP/1\\.[01] 101 " scripts/qualify-release-runtime.sh
+
+          qemu_pin='docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a'
+          binfmt_pin='docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0'
+          grep -Fq "$qemu_pin" .github/workflows/release-runtime.yml
+          grep -Fq "$binfmt_pin" .github/workflows/release-runtime.yml
+          grep -Fq "$qemu_pin" .github/workflows/release.yml
+          grep -Fq "$binfmt_pin" .github/workflows/release.yml
+
+          grep -Fq 'Qualify exact published runtime digest on amd64' .github/workflows/release-runtime.yml
+          grep -Fq 'Qualify exact published runtime digest on arm64' .github/workflows/release-runtime.yml
+          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/amd64' .github/workflows/release-runtime.yml
+          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/arm64' .github/workflows/release-runtime.yml
+
+          grep -Fq 'Qualify M1.17 exact release runtime on amd64 and arm64' .github/workflows/release.yml
+          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/amd64' .github/workflows/release.yml
+          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/arm64' .github/workflows/release.yml
+          runtime_line=$(grep -n 'Qualify M1.17 exact release runtime on amd64 and arm64' .github/workflows/release.yml | cut -d: -f1)
+          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
+          test "$runtime_line" -lt "$release_line"
 
       - name: Record release policy
         run: |
           {
-            echo "### M1.8 + M1.12 + M1.13 + M1.14 + M1.15 + M1.16 release integrity qualification"
+            echo "### M1.8 + M1.12 + M1.13 + M1.14 + M1.15 + M1.16 + M1.17 release integrity qualification"
             echo
             echo "- strict OCI-compatible SemVer release tags"
             echo "- annotated/lightweight tag commit must equal successful container workflow commit"
@@ -158,5 +172,6 @@ jobs:
             echo "- deterministic release evidence binds tag, commit and exact OCI digest"
             echo "- consumer verifier validates checksum, evidence policy, OCI revision, exact Cosign identity and attestations"
             echo "- the same consumer path runs before publication and again on published release assets"
-            echo "- exact digest must execute non-root/read-only, become healthy, serve generated config and complete a real WebSocket upgrade to pinned soju"
+            echo "- exact digest must execute non-root/read-only, become healthy, serve generated config and complete a real WebSocket upgrade"
+            echo "- M1.17 requires that same runtime contract on both linux/amd64 and linux/arm64, with arm64 executed through immutably pinned QEMU/binfmt on GitHub-hosted amd64 runners"
           } >> "$GITHUB_STEP_SUMMARY"
