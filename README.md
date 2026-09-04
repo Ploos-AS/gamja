@@ -18,12 +18,16 @@ Targets:
 - read-only-root-filesystem friendly
 - no Node.js in the runtime image
 - reproducible upstream source pin
+- pinned multi-platform base-image digests
+- SBOM and BuildKit provenance on published images
 
 The current build is pinned to upstream commit:
 
 ```text
 0f273b96994fb32b3a1b868d4b59229285f3455c
 ```
+
+The current release base images are pinned by multi-platform index digest in the Dockerfile.
 
 ## Architecture
 
@@ -188,10 +192,20 @@ CI validates:
 - health check
 - a real WebSocket upgrade through `Gamja -> nginx /socket -> soju`
 - published linux/amd64 and linux/arm64 OCI manifests
+- pinned GitHub Actions by commit SHA
+- SBOM generation for published images
+- BuildKit provenance with `mode=max`
 
-## Upstream
+## Releases
+
+Releases use semantic tags such as `v0.1.0`. A tag publishes the full version plus major/minor aliases. `latest` is produced from the qualified default branch.
+
+The complete release gate and procedure are documented in `RELEASE.md`. Published release tags are treated as immutable; fixes are released under a new version.
+
+## License and upstream
 
 - Gamja: https://github.com/Libera-Chat/gamja
 - soju: https://soju.im/
+- Repository license: AGPL-3.0-only
 
-Gamja is licensed under AGPLv3. See upstream for the application license and source.
+Gamja is distributed under AGPLv3. This repository builds a pinned upstream revision and retains that licensing model.
