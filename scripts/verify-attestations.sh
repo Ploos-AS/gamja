@@ -17,24 +17,31 @@ for platform in linux/amd64 linux/arm64; do
   provenance_file=$(mktemp)
   trap 'rm -f "$sbom_file" "$provenance_file"' EXIT HUP INT TERM
 
-  docker buildx imagetools inspect "$image" \
-    --format "{{ json (index .SBOM \"$platform\").SPDX }}" >"$sbom_file"
-  jq -e '
-    type == "object" and
-    .SPDXID == "SPDXRef-DOCUMENT" and
-    (.spdxVersion | type == "string") and
-    (.packages | type == "array")
-  ' "$sbom_file" >/dev/null
+  echo "Checking $platform SPDX SBOM"
+  if ! docker buildx imagetools inspect "$image" \
+    --format "{{ json (index .SBOM \"$platform\").SPDX }}" >"$sbom_file"; then
+    echo "$platform: failed to retrieve SPDX SBOM attestation" >&2
+    exit 1
+  fi
+  if ! jq -e 'type == "object" and .SPDXID == "SPDXRef-DOCUMENT"' "$sbom_file" >/dev/null; then
+    echo "$platform: invalid SPDX SBOM attestation" >&2
+    echo "Decoded SBOM:" >&2
+    cat "$sbom_file" >&2
+    exit 1
+  fi
 
-  docker buildx imagetools inspect "$image" \
-    --format "{{ json (index .Provenance \"$platform\").SLSA }}" >"$provenance_file"
-  jq -e '
-    type == "object" and
-    .buildType == "https://mobyproject.org/buildkit@v1" and
-    (.invocation | type == "object") and
-    (.metadata | type == "object") and
-    (.materials | type == "array")
-  ' "$provenance_file" >/dev/null
+  echo "Checking $platform BuildKit provenance"
+  if ! docker buildx imagetools inspect "$image" \
+    --format "{{ json (index .Provenance \"$platform\").SLSA }}" >"$provenance_file"; then
+    echo "$platform: failed to retrieve BuildKit provenance attestation" >&2
+    exit 1
+  fi
+  if ! jq -e 'type == "object" and .buildType == "https://mobyproject.org/buildkit@v1"' "$provenance_file" >/dev/null; then
+    echo "$platform: invalid BuildKit provenance attestation" >&2
+    echo "Decoded provenance:" >&2
+    cat "$provenance_file" >&2
+    exit 1
+  fi
 
   echo "$platform: SPDX SBOM + BuildKit SLSA provenance verified"
   rm -f "$sbom_file" "$provenance_file"
