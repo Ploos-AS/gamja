@@ -1,0 +1,84 @@
+name: upstream
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Verify pinned upstream source is reachable
+        run: |
+          set -eu
+          pinned=$(awk '$1 == "ARG" && $2 ~ /^GAMJA_COMMIT=/ {sub(/^GAMJA_COMMIT=/, "", $2); print $2}' Dockerfile)
+          test -n "$pinned"
+          curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/Libera-Chat/gamja/commits/$pinned" >/dev/null
+
+      - name: Check upstream production branch drift
+        id: drift
+        shell: bash
+        run: |
+          set +e
+          output=$(sh scripts/check-upstream.sh 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$output"
+          status=$(printf '%s\n' "$output" | awk -F= '$1 == "status" {print $2}')
+          latest=$(printf '%s\n' "$output" | awk -F= '$1 == "latest_commit" {print $2}')
+          pinned=$(printf '%s\n' "$output" | awk -F= '$1 == "pinned_commit" {print $2}')
+          test -n "$status"
+          test -n "$latest"
+          test -n "$pinned"
+          case "$rc" in
+            0|10) ;;
+            *) exit "$rc" ;;
+          esac
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+
+      - name: Qualify drift checker semantics
+        run: |
+          set -eu
+          tmp=$(mktemp)
+          trap 'rm -f "$tmp"' EXIT
+          printf '{"sha":"0f273b96994fb32b3a1b868d4b59229285f3455c"}\n' > "$tmp"
+          UPSTREAM_API_URL="file://$tmp" sh scripts/check-upstream.sh | grep -qx 'status=current'
+          printf '{"sha":"1111111111111111111111111111111111111111"}\n' > "$tmp"
+          set +e
+          UPSTREAM_API_URL="file://$tmp" sh scripts/check-upstream.sh > /tmp/upstream-drift.out
+          rc=$?
+          set -e
+          test "$rc" -eq 10
+          grep -qx 'status=update-available' /tmp/upstream-drift.out
+
+      - name: Record M1.9 upstream status
+        if: always()
+        run: |
+          {
+            echo "### M1.9 upstream qualification"
+            echo
+            echo "- Repository: \`Libera-Chat/gamja\`"
+            echo "- Tracked branch: \`production\`"
+            echo "- Pinned commit: \`${{ steps.drift.outputs.pinned }}\`"
+            echo "- Latest upstream commit: \`${{ steps.drift.outputs.latest }}\`"
+            echo "- Status: \`${{ steps.drift.outputs.status }}\`"
+            echo "- Policy: upstream drift is reported but never changes the production pin automatically"
+          } >> "$GITHUB_STEP_SUMMARY"
