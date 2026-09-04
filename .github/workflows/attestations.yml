@@ -35,12 +35,46 @@ jobs:
 
       - name: Resolve latest digest
         id: image
+        env:
+          EXPECTED_REVISION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          digest=$(docker buildx imagetools inspect ghcr.io/ploos-as/gamja:latest | awk '/^Digest:/ {print $2; exit}')
-          test -n "$digest"
+          image=ghcr.io/ploos-as/gamja:latest
+          digest=''
+          revision=''
+
+          # GHCR can briefly lag immediately after the publishing workflow
+          # completes. Retry the immutable resolution, but never accept a
+          # digest unless its OCI revision matches the triggering commit.
+          for attempt in $(seq 1 12); do
+            if inspect="$(docker buildx imagetools inspect "$image" 2>/tmp/imagetools.err)"; then
+              digest="$(awk '/^Digest:/ {print $2; exit}' <<<"$inspect")"
+              if [ -n "$digest" ]; then
+                raw="$(docker buildx imagetools inspect "ghcr.io/ploos-as/gamja@$digest" --raw 2>/tmp/imagetools-raw.err || true)"
+                if [ -n "$raw" ]; then
+                  revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // empty' <<<"$raw")"
+                  if [ "$revision" = "$EXPECTED_REVISION" ]; then
+                    break
+                  fi
+                  echo "Attempt $attempt: latest resolved to revision '$revision', expected '$EXPECTED_REVISION'; retrying."
+                fi
+              fi
+            else
+              echo "Attempt $attempt: latest is not yet inspectable; retrying."
+              cat /tmp/imagetools.err >&2 || true
+            fi
+            digest=''
+            sleep 5
+          done
+
+          test -n "$digest" || {
+            echo "Could not resolve ghcr.io/ploos-as/gamja:latest to the triggering revision $EXPECTED_REVISION" >&2
+            exit 1
+          }
+          test "$revision" = "$EXPECTED_REVISION"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
       - name: Verify published SBOM and provenance attestations
         env:
@@ -52,11 +86,14 @@ jobs:
       - name: Record M1.13 attestation status
         env:
           DIGEST: ${{ steps.image.outputs.digest }}
+          REVISION: ${{ steps.image.outputs.revision }}
         run: |
           {
             echo '### M1.13 attestation qualification'
             echo
             echo "Digest: \`$DIGEST\`"
+            echo "Revision: \`$REVISION\`"
+            echo '- GHCR latest resolution matched the triggering container commit'
             echo '- linux/amd64 SPDX SBOM verified'
             echo '- linux/amd64 BuildKit SLSA provenance verified'
             echo '- linux/arm64 SPDX SBOM verified'
