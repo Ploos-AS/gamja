@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.title="Gamja" \
 ENV SOJU_HOST=soju \
     SOJU_PORT=8080
 COPY nginx.conf /etc/gamja/nginx.conf.template
-COPY entrypoint.sh /usr/local/bin/gamja-entrypoint
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/gamja-entrypoint
 COPY --from=builder /src/dist/ /usr/share/nginx/html/
 COPY config.json /usr/share/nginx/html/config.json
 EXPOSE 8080
