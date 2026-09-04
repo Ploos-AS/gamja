@@ -20,11 +20,11 @@ A release candidate must satisfy all of the following on `main`:
 - the published OCI digest is keylessly signed by the repository's `container` workflow using GitHub Actions OIDC
 - SPDX SBOM and BuildKit SLSA provenance are present and structurally valid for linux/amd64 and linux/arm64
 - deterministic release evidence binds the tag, release commit and exact verified OCI digest
-- the exact release digest passes M1.16 runtime qualification as UID 101 with read-only rootfs, healthy state, generated config and a real WebSocket upgrade to pinned soju
+- the exact release digest passes the runtime contract as UID 101 with read-only rootfs, healthy state, generated config and a real WebSocket upgrade to pinned soju on both linux/amd64 and linux/arm64
 
-M1.7 security policy is documented in `SECURITY.md`, M1.10 dependency policy in `DEPENDENCIES.md`, M1.11 signing trust in `SIGNING.md`, M1.13 attestation policy in `ATTESTATIONS.md`, M1.14/M1.15 evidence and consumer verification in `RELEASE-EVIDENCE.md`, and M1.16 exact-digest runtime qualification in `RELEASE-RUNTIME.md`.
+M1.7 security policy is documented in `SECURITY.md`, M1.10 dependency policy in `DEPENDENCIES.md`, M1.11 signing trust in `SIGNING.md`, M1.13 attestation policy in `ATTESTATIONS.md`, M1.14/M1.15 evidence and consumer verification in `RELEASE-EVIDENCE.md`, and M1.16/M1.17 exact-digest runtime qualification in `RELEASE-RUNTIME.md`.
 
-M1.8 binds the release tag, successful container workflow commit, and OCI revision to the same Git commit. M1.12 extends that chain to the exact Cosign-signed OCI digest. M1.13 further requires that the same digest expose valid SPDX SBOM and BuildKit SLSA provenance attestations for both supported platforms before GitHub Release creation. M1.14 records those already-verified facts in deterministic machine-readable release assets. M1.15 verifies the same release identity through the consumer path. M1.16 finally executes the exact release digest and requires the production runtime contract to hold before publication.
+M1.8 binds the release tag, successful container workflow commit, and OCI revision to the same Git commit. M1.12 extends that chain to the exact Cosign-signed OCI digest. M1.13 further requires that the same digest expose valid SPDX SBOM and BuildKit SLSA provenance attestations for both supported platforms before GitHub Release creation. M1.14 records those already-verified facts in deterministic machine-readable release assets. M1.15 verifies the same release identity through the consumer path. M1.16 executes the exact release digest on linux/amd64. M1.17 extends that exact-digest execution gate to linux/arm64 as well, using immutably pinned QEMU/binfmt on GitHub-hosted amd64 runners.
 
 ## Versioning
 
@@ -55,14 +55,16 @@ Stable releases publish full version plus major/minor aliases. `latest` is publi
 10. verifies SPDX SBOM and BuildKit SLSA provenance on the exact digest for amd64 and arm64
 11. generates and validates deterministic `release-evidence.json` plus its SHA-256 checksum
 12. runs the M1.15 consumer verifier against that exact evidence and OCI artifact
-13. executes the exact digest through the M1.16 non-root/read-only health/config/WebSocket runtime gate
-14. creates the matching GitHub Release with both evidence files attached only after every integrity, signature, attestation, consumer and runtime gate succeeds
+13. installs the SHA-pinned QEMU/binfmt runtime needed for arm64 execution on the GitHub-hosted amd64 runner
+14. executes the exact digest through the non-root/read-only health/config/WebSocket runtime gate on linux/amd64
+15. executes that same exact digest through the same runtime gate on linux/arm64
+16. creates the matching GitHub Release with both evidence files attached only after every integrity, signature, attestation, consumer and multi-architecture runtime gate succeeds
 
 The workflow is idempotent: an existing GitHub Release is not replaced.
 
-`.github/workflows/release-policy.yml` continuously qualifies the strict tag validator, M1.8 revision wiring, M1.12 Cosign identity constraints, M1.13 attestation wiring, M1.14 deterministic evidence generation, M1.15 consumer verification and M1.16 runtime-gate ordering before release creation.
+`.github/workflows/release-policy.yml` continuously qualifies the strict tag validator, M1.8 revision wiring, M1.12 Cosign identity constraints, M1.13 attestation wiring, M1.14 deterministic evidence generation, M1.15 consumer verification, M1.16 immutable runtime rules and M1.17 two-platform runtime-gate ordering before release creation.
 
-`.github/workflows/release-runtime.yml` continuously exercises the M1.16 runtime qualifier against the exact newly published `main` digest. It waits for GHCR consistency and binds `latest` back to the successful container workflow commit through the OCI revision annotation before resolving the immutable digest.
+`.github/workflows/release-runtime.yml` continuously exercises the runtime qualifier against the exact newly published `main` digest. It waits for GHCR consistency and binds `latest` back to the successful container workflow commit through the OCI revision annotation before resolving the immutable digest, then executes both supported platform manifests.
 
 ## Release steps
 
@@ -72,8 +74,8 @@ The workflow is idempotent: an existing GitHub Release is not replaced.
 4. Wait for the tag-triggered `container` workflow to build, scan, publish, sign and self-verify the exact digest.
 5. The release workflow independently verifies tag -> workflow commit -> OCI revision -> signed digest -> SBOM/provenance attestations.
 6. It generates deterministic release evidence and validates the consumer verification path.
-7. The exact immutable digest is then executed through the M1.16 release runtime qualifier.
+7. The exact immutable digest is then executed through the release runtime qualifier on linux/amd64 and linux/arm64.
 8. Only then is the GitHub Release created with `release-evidence.json` and `release-evidence.json.sha256` attached.
-9. Verify the GitHub Release, evidence checksum, versioned image, platforms, OCI revision, signature, SPDX SBOM, BuildKit provenance and release-runtime qualification.
+9. Verify the GitHub Release, evidence checksum, versioned image, platforms, OCI revision, signature, SPDX SBOM, BuildKit provenance and both release-runtime qualifications.
 
 Published tags are immutable release artifacts. Fixes require a new semantic version.
