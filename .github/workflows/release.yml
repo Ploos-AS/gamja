@@ -131,6 +131,17 @@ jobs:
           ./scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256
           echo 'M1.15 consumer verifier accepted the exact release evidence and OCI artifact before publication.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Qualify M1.16 exact release runtime
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          DIGEST: ${{ steps.meta.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/qualify-release-runtime.sh
+          ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"
+          echo 'M1.16 release gate: exact immutable OCI digest passed non-root/read-only health, config and real WebSocket runtime qualification.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
         env:
@@ -162,6 +173,7 @@ jobs:
           - Cosign keyless signature verified for the exact release digest before GitHub Release creation
           - machine-readable M1.14 release evidence plus SHA-256 checksum attached to this release
           - M1.15 consumer verifier qualified against the same evidence, signature and attestations before publication
+          - M1.16 exact release digest executed and qualified non-root/read-only with health, generated config and real soju WebSocket upgrade
 
           Container image:
           \`$IMAGE\`
