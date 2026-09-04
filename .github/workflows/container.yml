@@ -93,6 +93,7 @@ jobs:
             type=semver,pattern={{major}}
 
       - name: Build and optionally push multi-arch image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -106,13 +107,15 @@ jobs:
       - name: Verify published multi-arch manifest
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           image=ghcr.io/ploos-as/gamja:latest
           docker buildx imagetools inspect --raw "$image" > /tmp/manifest.json
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")' /tmp/manifest.json
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' /tmp/manifest.json
-          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ {print $2; exit}')"
+          digest="$IMAGE_DIGEST"
           test -n "$digest"
           echo "Published digest: $digest"
           echo "### Published image" >> "$GITHUB_STEP_SUMMARY"
