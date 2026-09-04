@@ -27,12 +27,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(GAMJA_DOMAIN=irc.example.test docker compose -f examples/production/compose.yaml config --images | grep '^ghcr.io/ploos-as/soju:' | head -1)" = "$SOJU_IMAGE"
-          test "$(GAMJA_DOMAIN=irc.example.test docker compose -f examples/production/compose.yaml config --images | grep '^caddy:' | head -1)" = "$CADDY_IMAGE"
-          docker buildx imagetools inspect "$SOJU_IMAGE" | grep -q 'linux/amd64'
-          docker buildx imagetools inspect "$SOJU_IMAGE" | grep -q 'linux/arm64'
-          docker buildx imagetools inspect "$CADDY_IMAGE" | grep -q 'linux/amd64'
-          docker buildx imagetools inspect "$CADDY_IMAGE" | grep -q 'linux/arm64'
+          grep -Fqx "    image: $SOJU_IMAGE" examples/production/compose.yaml
+          grep -Fqx "    image: $CADDY_IMAGE" examples/production/compose.yaml
+          soju_manifest="$(docker buildx imagetools inspect "$SOJU_IMAGE")"
+          caddy_manifest="$(docker buildx imagetools inspect "$CADDY_IMAGE")"
+          printf '%s\n' "$soju_manifest" | grep 'linux/amd64'
+          printf '%s\n' "$soju_manifest" | grep 'linux/arm64'
+          printf '%s\n' "$caddy_manifest" | grep 'linux/amd64'
+          printf '%s\n' "$caddy_manifest" | grep 'linux/arm64'
           sh -n examples/production/backup.sh
           sh -n examples/production/restore.sh
 
@@ -181,5 +183,9 @@ jobs:
 
       - name: Cleanup
         if: always()
-        working-directory: /tmp/gamja-m14
-        run: docker compose down -v || true
+        shell: bash
+        run: |
+          if [ -d /tmp/gamja-m14 ]; then
+            cd /tmp/gamja-m14
+            docker compose down -v || true
+          fi
