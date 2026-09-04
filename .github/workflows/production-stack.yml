@@ -109,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in {1..30}; do
-            if curl -kfsS https://127.0.0.1:18443/ -H 'Host: localhost' >/tmp/m13-index.html; then break; fi
+            if curl -kfsS --resolve localhost:18443:127.0.0.1 https://localhost:18443/ >/tmp/m13-index.html; then break; fi
             sleep 1
           done
           grep -q '<title>gamja IRC client</title>' /tmp/m13-index.html
