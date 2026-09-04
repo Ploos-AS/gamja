@@ -3,12 +3,13 @@ services:
     image: ghcr.io/ploos-as/gamja:latest
     container_name: gamja
     restart: unless-stopped
+    environment:
+      SOJU_HOST: ${SOJU_HOST:-soju}
+      SOJU_PORT: ${SOJU_PORT:-8080}
     ports:
-      - "8080:8080"
+      - "${GAMJA_PORT:-8080}:8080"
     read_only: true
     tmpfs:
       - /tmp
-      - /var/cache/nginx
-      - /var/run
     security_opt:
       - no-new-privileges:true
