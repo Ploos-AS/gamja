@@ -1,0 +1,49 @@
+name: operations-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operations-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Render production Compose model
+        run: |
+          set -euo pipefail
+          GAMJA_DOMAIN=example.invalid docker compose -f examples/production/compose.yaml config --format json >/tmp/m16-compose.json
+          jq -e . /tmp/m16-compose.json >/dev/null
+
+      - name: Verify resource guardrails and log rotation
+        run: |
+          set -euo pipefail
+          jq -e '.services.soju.cpus == 1 and .services.soju.mem_limit == 268435456 and .services.soju.pids_limit == 256' /tmp/m16-compose.json
+          jq -e '.services.gamja.cpus == 0.5 and .services.gamja.mem_limit == 134217728 and .services.gamja.pids_limit == 128' /tmp/m16-compose.json
+          jq -e '.services.caddy.cpus == 1 and .services.caddy.mem_limit == 268435456 and .services.caddy.pids_limit == 256' /tmp/m16-compose.json
+          for service in soju gamja caddy; do
+            jq -e --arg service "$service" '.services[$service].logging.driver == "json-file"' /tmp/m16-compose.json
+            jq -e --arg service "$service" '.services[$service].logging.options["max-size"] == "10m"' /tmp/m16-compose.json
+            jq -e --arg service "$service" '.services[$service].logging.options["max-file"] == "3"' /tmp/m16-compose.json
+          done
+
+      - name: Verify shutdown policy and operational docs
+        run: |
+          set -euo pipefail
+          jq -e '.services.soju.stop_grace_period == "30s"' /tmp/m16-compose.json
+          jq -e '.services.gamja.stop_grace_period == "15s"' /tmp/m16-compose.json
+          jq -e '.services.caddy.stop_grace_period == "30s"' /tmp/m16-compose.json
+          test -s examples/production/OPERATIONS.md
+          grep -q 'docker compose logs -f' examples/production/OPERATIONS.md
+          grep -q 'docker stats' examples/production/OPERATIONS.md
+          grep -q 'docker compose pull' examples/production/OPERATIONS.md
