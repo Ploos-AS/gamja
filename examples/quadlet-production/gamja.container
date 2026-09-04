@@ -13,6 +13,9 @@ Environment=SOJU_PORT=8080
 Environment=GAMJA_SERVER_URL=/socket
 ReadOnly=true
 Tmpfs=/tmp
+LogDriver=journald
+Memory=128m
+PidsLimit=128
 HealthCmd=wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1
 HealthInterval=30s
 HealthTimeout=5s
@@ -22,6 +25,9 @@ HealthStartPeriod=10s
 [Service]
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do podman healthcheck run soju >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
 Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=15s
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target
