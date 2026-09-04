@@ -102,3 +102,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify published multi-arch manifest
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=ghcr.io/ploos-as/gamja:latest
+          docker buildx imagetools inspect --raw "$image" > /tmp/manifest.json
+          jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")' /tmp/manifest.json
+          jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' /tmp/manifest.json
+          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ {print $2; exit}')"
+          test -n "$digest"
+          echo "Published digest: $digest"
+          echo "### Published image" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$image\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Platforms: \`linux/amd64\`, \`linux/arm64\`" >> "$GITHUB_STEP_SUMMARY"
