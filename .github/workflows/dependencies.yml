@@ -49,7 +49,8 @@ jobs:
             name=$1
             tag=$2
             pinned=$3
-            current=$(docker buildx imagetools inspect "$tag" | awk '/^Digest:/ {print $2; exit}')
+            inspect=$(docker buildx imagetools inspect "$tag")
+            current=$(printf '%s\n' "$inspect" | awk '/^Digest:/ {print $2; found=1} END {if (!found) exit 1}')
             test -n "$current"
             if [[ "$current" == "$pinned" ]]; then status=current; else status=update-available; fi
             printf '%s tag=%s pinned=%s current=%s status=%s\n' "$name" "$tag" "$pinned" "$current" "$status" | tee -a /tmp/dependency-drift.txt
