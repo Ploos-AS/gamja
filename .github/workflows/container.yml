@@ -178,6 +178,7 @@ jobs:
             org.opencontainers.image.description=Minimal non-root container for the Gamja IRC web client
             org.opencontainers.image.source=https://github.com/Ploos-AS/gamja
             org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and optionally push multi-arch image
         id: build
@@ -193,6 +194,7 @@ jobs:
             index,manifest:org.opencontainers.image.description=Minimal non-root container for the Gamja IRC web client
             index,manifest:org.opencontainers.image.source=https://github.com/Ploos-AS/gamja
             index,manifest:org.opencontainers.image.licenses=AGPL-3.0-only
+            index,manifest:org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           sbom: ${{ github.event_name != 'pull_request' && 'generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9' || 'false' }}
@@ -215,6 +217,7 @@ jobs:
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' /tmp/manifest.json
           jq -e '.annotations["org.opencontainers.image.licenses"] == "AGPL-3.0-only"' /tmp/manifest.json
           jq -e '.annotations["org.opencontainers.image.source"] == "https://github.com/Ploos-AS/gamja"' /tmp/manifest.json
+          jq -e --arg revision "$GITHUB_SHA" '.annotations["org.opencontainers.image.revision"] == $revision' /tmp/manifest.json
           digest="$IMAGE_DIGEST"
           test -n "$digest"
           echo "Published digest: $digest"
@@ -222,6 +225,7 @@ jobs:
           echo "\`$image\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Revision: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Platforms: \`linux/amd64\`, \`linux/arm64\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Actions runtime: Node 24-native, immutable SHA pins" >> "$GITHUB_STEP_SUMMARY"
@@ -234,4 +238,5 @@ jobs:
           echo "SBOM generator: \`docker/buildkit-syft-scanner@sha256:ae4f3b55...\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Trivy: \`v0.74.0\`, action v0.36.0 pinned at \`ed142fd...\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Security gate: fixable HIGH/CRITICAL runtime CVEs + HIGH/CRITICAL repo secret/misconfiguration findings" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release integrity: OCI revision annotation bound to the exact workflow commit" >> "$GITHUB_STEP_SUMMARY"
           echo "Provenance: mode=max" >> "$GITHUB_STEP_SUMMARY"
