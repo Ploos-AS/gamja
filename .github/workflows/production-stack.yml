@@ -92,13 +92,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          soju_id="$(docker compose ps -q soju)"
+          gamja_id="$(docker compose ps -q gamja)"
+          test -n "$soju_id"
+          test -n "$gamja_id"
           for i in {1..30}; do
-            if [ "$(docker compose ps --format json soju | jq -r '.Health')" = healthy ]; then break; fi
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' "$soju_id")" = healthy ]; then break; fi
             sleep 1
           done
-          test "$(docker compose ps --format json soju | jq -r '.Health')" = healthy
-          test -z "$(docker compose port gamja 8080 || true)"
-          test -z "$(docker compose port soju 8080 || true)"
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$soju_id")" = healthy
+          docker inspect --format '{{json .HostConfig.PortBindings}}' "$gamja_id" | jq -e 'length == 0'
+          docker inspect --format '{{json .HostConfig.PortBindings}}' "$soju_id" | jq -e 'length == 0'
 
       - name: Verify HTTP redirect and HTTPS application
         shell: bash
@@ -136,8 +140,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          volume="$(docker compose config --volumes | grep '^soju-data$')"
-          test "$volume" = soju-data
+          docker compose config --volumes | grep -qx 'soju-data'
           docker compose exec -T soju sh -c 'test -d /var/lib/soju'
 
       - name: Cleanup
