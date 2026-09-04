@@ -1,0 +1,146 @@
+name: production-stack
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Build Gamja image
+        run: docker build -t gamja:m13 .
+
+      - name: Prepare qualification stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/gamja-m13
+          cp examples/production/soju.conf /tmp/gamja-m13/soju.conf
+          cat >/tmp/gamja-m13/Caddyfile <<'EOF'
+          https://localhost {
+              tls internal
+              reverse_proxy gamja:8080
+          }
+          EOF
+          cat >/tmp/gamja-m13/compose.yaml <<'EOF'
+          services:
+            soju:
+              image: ghcr.io/ploos-as/soju:latest
+              command: ["-config", "/etc/soju/config"]
+              volumes:
+                - ./soju.conf:/etc/soju/config:ro
+                - soju-data:/var/lib/soju
+              networks: [irc]
+              healthcheck:
+                test: ["CMD-SHELL", "sojudb -config /etc/soju/config help >/dev/null 2>&1 || exit 1"]
+                interval: 2s
+                timeout: 2s
+                retries: 15
+                start_period: 2s
+            gamja:
+              image: gamja:m13
+              depends_on:
+                soju:
+                  condition: service_healthy
+              environment:
+                SOJU_HOST: soju
+                SOJU_PORT: 8080
+                GAMJA_SERVER_URL: /socket
+                GAMJA_AUTH: optional
+              read_only: true
+              tmpfs: [/tmp]
+              networks: [irc]
+            caddy:
+              image: caddy:2-alpine
+              depends_on:
+                gamja:
+                  condition: service_started
+              ports:
+                - "18088:80"
+                - "18443:443"
+              volumes:
+                - ./Caddyfile:/etc/caddy/Caddyfile:ro
+                - caddy-data:/data
+                - caddy-config:/config
+              networks: [irc]
+          volumes:
+            soju-data:
+            caddy-data:
+            caddy-config:
+          networks:
+            irc:
+          EOF
+
+      - name: Start production stack
+        working-directory: /tmp/gamja-m13
+        run: docker compose up -d
+
+      - name: Verify dependency health and private app services
+        working-directory: /tmp/gamja-m13
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            if [ "$(docker compose ps --format json soju | jq -r '.Health')" = healthy ]; then break; fi
+            sleep 1
+          done
+          test "$(docker compose ps --format json soju | jq -r '.Health')" = healthy
+          test -z "$(docker compose port gamja 8080 || true)"
+          test -z "$(docker compose port soju 8080 || true)"
+
+      - name: Verify HTTP redirect and HTTPS application
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            if curl -kfsS https://127.0.0.1:18443/ -H 'Host: localhost' >/tmp/m13-index.html; then break; fi
+            sleep 1
+          done
+          grep -q '<title>gamja IRC client</title>' /tmp/m13-index.html
+          curl -sSI http://127.0.0.1:18088/ -H 'Host: localhost' >/tmp/m13-http-headers
+          grep -Eq '^HTTP/1\.[01] 30[18] ' /tmp/m13-http-headers
+          grep -qi '^Location: https://localhost/' /tmp/m13-http-headers
+
+      - name: Verify WSS through Caddy to Gamja and soju
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers=/tmp/m13-wss-headers
+          curl -k --http1.1 --max-time 2 --silent --show-error \
+            --resolve localhost:18443:127.0.0.1 \
+            -D "$headers" -o /tmp/m13-wss-body \
+            -H 'Connection: Upgrade' \
+            -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            https://localhost:18443/socket || true
+          cat "$headers"
+          grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
+          grep -qi '^Upgrade: websocket' "$headers"
+          grep -qi '^Connection: upgrade' "$headers"
+
+      - name: Verify persistent soju volume
+        working-directory: /tmp/gamja-m13
+        shell: bash
+        run: |
+          set -euo pipefail
+          volume="$(docker compose config --volumes | grep '^soju-data$')"
+          test "$volume" = soju-data
+          docker compose exec -T soju sh -c 'test -d /var/lib/soju'
+
+      - name: Cleanup
+        if: always()
+        working-directory: /tmp/gamja-m13
+        run: docker compose down -v || true
