@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 ARG GAMJA_REPO=https://github.com/Libera-Chat/gamja.git
 ARG GAMJA_COMMIT=0f273b96994fb32b3a1b868d4b59229285f3455c
 
