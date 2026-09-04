@@ -54,7 +54,7 @@ jobs:
           done
 
           curl --fail --silent --show-error http://127.0.0.1:18080/config.json >/tmp/gamja-config.json
-          grep -q '<title>gamja</title>' /tmp/gamja-index.html
+          grep -q '<title>gamja IRC client</title>' /tmp/gamja-index.html
           grep -q '"url": "/socket"' /tmp/gamja-config.json
 
           for i in {1..30}; do
