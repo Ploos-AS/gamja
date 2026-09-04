@@ -93,6 +93,17 @@ jobs:
           jq -e 'length > 0' /tmp/release-cosign-verification.json >/dev/null
           echo 'M1.12 release gate: keyless signature verified for exact release digest.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify release SBOM and provenance attestations
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          DIGEST: ${{ steps.meta.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/verify-attestations.sh
+          ./scripts/verify-attestations.sh "ghcr.io/ploos-as/gamja@$DIGEST"
+          echo 'M1.13 release gate: SPDX SBOM and BuildKit SLSA provenance verified for amd64 and arm64.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
         env:
@@ -119,7 +130,7 @@ jobs:
           - qualified HTTPS/WSS reverse-proxy paths and production backup/restore
           - release-blocking HIGH/CRITICAL Trivy security qualification
           - multi-architecture OCI image for \`linux/amd64\` and \`linux/arm64\`
-          - SBOM and BuildKit provenance (mode=max)
+          - SPDX SBOM and BuildKit SLSA provenance (mode=max), verified for both platforms
           - OCI revision annotation verified against the exact release tag commit
           - Cosign keyless signature verified for the exact release digest before GitHub Release creation
 
