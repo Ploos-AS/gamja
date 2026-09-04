@@ -6,6 +6,12 @@ services:
     environment:
       SOJU_HOST: ${SOJU_HOST:-soju}
       SOJU_PORT: ${SOJU_PORT:-8080}
+      GAMJA_SERVER_URL: ${GAMJA_SERVER_URL:-/socket}
+      GAMJA_AUTH: ${GAMJA_AUTH:-optional}
+      GAMJA_AUTOJOIN: ${GAMJA_AUTOJOIN:-}
+      GAMJA_NICK: ${GAMJA_NICK:-}
+      GAMJA_AUTOCONNECT: ${GAMJA_AUTOCONNECT:-}
+      GAMJA_PING: ${GAMJA_PING:-}
     ports:
       - "${GAMJA_PORT:-8080}:8080"
     read_only: true
