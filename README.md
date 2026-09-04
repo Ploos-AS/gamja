@@ -14,7 +14,7 @@ Targets:
 
 - linux/amd64
 - linux/arm64
-- non-root runtime
+- non-root runtime with explicit UID 101
 - read-only-root-filesystem friendly
 - no Node.js in the runtime image
 - reproducible upstream source pin
@@ -23,6 +23,8 @@ Targets:
 - pinned QEMU/binfmt and BuildKit
 - explicit OCI license metadata
 - SBOM and BuildKit provenance on published images
+- release-blocking Trivy security qualification
+- daily vulnerability, secret and misconfiguration re-scan
 - runtime Gamja configuration through environment variables
 - qualified Caddy and nginx reverse-proxy examples for HTTPS/WSS deployment
 - qualified production Compose stack with Caddy + Gamja + soju
@@ -166,7 +168,9 @@ docker build --build-arg GAMJA_COMMIT=<commit> -t gamja:test .
 
 ## Security/runtime notes
 
-The runtime uses unprivileged nginx on port 8080. Supplied deployments use a read-only root filesystem, `/tmp` for transient runtime state, and `no-new-privileges` where applicable.
+The runtime uses unprivileged nginx on port 8080 and explicitly declares UID 101 in the final Dockerfile stage. Supplied deployments use a read-only root filesystem, `/tmp` for transient runtime state, and `no-new-privileges` where applicable.
+
+M1.7 scans the shipped runtime image for fixable `HIGH` and `CRITICAL` OS/library vulnerabilities and scans the repository for `HIGH` and `CRITICAL` secrets and misconfigurations. These checks run before GHCR publication. A dedicated daily security workflow repeats the qualification against current vulnerability intelligence. See `SECURITY.md` for the policy and scope boundary.
 
 Gamja itself is a browser client. Serve the site and WebSocket endpoint over HTTPS/WSS outside trusted local testing. In the production Compose example only Caddy is Internet-facing; application ports remain private to the Compose network.
 
@@ -191,6 +195,11 @@ CI validates:
 - M1.3 HTTP-to-HTTPS redirect and HTTPS application delivery
 - M1.3 WSS through `Caddy -> Gamja -> soju`
 - M1.3 persistent soju volume wiring
+- M1.6 Compose and Quadlet operations/resource policy
+- M1.6 real systemd/Podman crash-restart-recovery
+- M1.7 no fixable HIGH/CRITICAL vulnerabilities in the final runtime image
+- M1.7 no HIGH/CRITICAL repository secret or misconfiguration findings
+- M1.7 daily continuous security re-scan
 - published linux/amd64 and linux/arm64 OCI manifests
 - OCI license metadata
 - pinned GitHub Actions/QEMU/BuildKit tooling
