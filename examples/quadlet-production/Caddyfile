@@ -1,0 +1,4 @@
+{$GAMJA_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy gamja:8080
+}
