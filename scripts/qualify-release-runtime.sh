@@ -66,7 +66,7 @@ docker run -d \
   --security-opt no-new-privileges:true \
   "$image_ref" >/dev/null
 
-# Runtime identity/security contract.
+# Runtime identity/security contract: expected UID 101, read-only rootfs and NNP.
 test "$(docker inspect --format '{{.Config.User}}' "$gamja_container")" = "101"
 test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$gamja_container")" = "true"
 test "$(docker inspect --format '{{ index .HostConfig.SecurityOpt 0 }}' "$gamja_container")" = "no-new-privileges:true"
