@@ -18,6 +18,7 @@ Targets:
 - read-only-root-filesystem friendly
 - no Node.js in the runtime image
 - reproducible upstream source pin
+- daily upstream `production` drift qualification without automatic source changes
 - pinned multi-platform base-image digests
 - pinned GitHub Actions by commit SHA
 - pinned QEMU/binfmt and BuildKit
@@ -35,6 +36,8 @@ The current build is pinned to upstream commit:
 ```text
 0f273b96994fb32b3a1b868d4b59229285f3455c
 ```
+
+M1.9 continuously compares this immutable pin with upstream `Libera-Chat/gamja:production`. Upstream movement is reported as `update-available` but never changes the production source automatically. See `UPSTREAM.md` for the review/update procedure.
 
 ## Architecture
 
@@ -179,49 +182,14 @@ Gamja itself is a browser client. Serve the site and WebSocket endpoint over HTT
 
 CI validates:
 
-- amd64 runtime smoke test
-- non-root execution
-- read-only root filesystem
-- health check
-- default generated Gamja configuration
-- M1.0 server/runtime overrides
-- M1.1 multi-channel autojoin
-- M1.1 OAuth2 configuration generation
-- rejection of invalid runtime configuration
-- a real WebSocket upgrade through `Gamja -> nginx /socket -> soju`
-- M1.2 Caddy reverse-proxy WebSocket upgrade
-- M1.2 nginx TLS termination and WSS upgrade
-- M1.3 production Compose dependency health
-- M1.3 private Gamja/soju service ports
-- M1.3 HTTP-to-HTTPS redirect and HTTPS application delivery
-- M1.3 WSS through `Caddy -> Gamja -> soju`
-- M1.3 persistent soju volume wiring
-- M1.6 Compose and Quadlet operations/resource policy
-- M1.6 real systemd/Podman crash-restart-recovery
-- M1.7 no fixable HIGH/CRITICAL vulnerabilities in the final runtime image
-- M1.7 no HIGH/CRITICAL repository secret or misconfiguration findings
-- M1.7 daily continuous security re-scan
-- M1.8 strict OCI-compatible release-tag validation
-- M1.8 release tag commit equals the successful container workflow commit
-- M1.8 OCI revision annotation equals the exact built/released commit
-- published linux/amd64 and linux/arm64 OCI manifests
-- OCI license metadata
-- pinned GitHub Actions/QEMU/BuildKit tooling
-- SBOM generation
-- BuildKit provenance with `mode=max`
-
-## Releases
-
-Release tags use an OCI-compatible SemVer subset such as `v0.2.0` or `v0.2.0-rc.1`. Build metadata (`+...`) is rejected because it cannot map losslessly to an OCI tag. Stable tags publish the full version plus major/minor aliases. `latest` is produced from the qualified default branch.
-
-M1.8 binds each published OCI index to its exact Git commit with `org.opencontainers.image.revision`; GitHub Release creation additionally verifies that the Git tag, successful container workflow, and OCI revision all identify the same commit.
-
-The complete release gate and procedure are documented in `RELEASE.md`. Published release tags are treated as immutable; fixes are released under a new version.
-
-## License and upstream
-
-- Gamja: https://github.com/Libera-Chat/gamja
-- soju: https://soju.im/
-- Repository license: AGPL-3.0-only
-
-Gamja is distributed under AGPLv3. This repository builds a pinned upstream revision and retains that licensing model. Published OCI metadata explicitly records `org.opencontainers.image.licenses=AGPL-3.0-only`.
+- amd64 and arm64 publication;
+- non-root/read-only runtime behavior;
+- runtime configuration validation;
+- real Gamja-to-soju WebSocket upgrade;
+- Caddy and nginx HTTPS/WSS proxy paths;
+- production Compose startup, persistence and restore;
+- Podman/Quadlet production parity and restart recovery;
+- operations/resource/logging policy;
+- runtime and repository security gates;
+- strict release tag/revision integrity;
+- upstream pin reachability and daily `production` drift reporting.
