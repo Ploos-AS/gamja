@@ -57,13 +57,13 @@ jobs:
             systemctl cat "$service.service" >"/tmp/$service.service"
             grep -q -- '--log-driver journald' "/tmp/$service.service"
           done
-          grep -q -- '--memory 256m' /tmp/soju.service
+          grep -Eq -- '--memory(=| )256m' /tmp/soju.service
           grep -q -- '--pids-limit 256' /tmp/soju.service
           grep -q 'CPUQuota=100%' /tmp/soju.service
-          grep -q -- '--memory 128m' /tmp/gamja.service
+          grep -Eq -- '--memory(=| )128m' /tmp/gamja.service
           grep -q -- '--pids-limit 128' /tmp/gamja.service
           grep -q 'CPUQuota=50%' /tmp/gamja.service
-          grep -q -- '--memory 256m' /tmp/caddy.service
+          grep -Eq -- '--memory(=| )256m' /tmp/caddy.service
           grep -q -- '--pids-limit 256' /tmp/caddy.service
           grep -q 'CPUQuota=100%' /tmp/caddy.service
           grep -q 'RestartSec=3s' /tmp/soju.service
