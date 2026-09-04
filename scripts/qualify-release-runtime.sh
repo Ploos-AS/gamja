@@ -36,6 +36,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+fail() {
+  echo "release runtime qualification failed: $*" >&2
+  docker inspect "$gamja_container" >/dev/null 2>&1 && docker logs "$gamja_container" >&2 || true
+  docker inspect "$soju_container" >/dev/null 2>&1 && docker logs "$soju_container" >&2 || true
+  exit 1
+}
+
 cat >"$soju_config" <<'EOF'
 db sqlite3 /var/lib/soju/main.db
 listen http+insecure://0.0.0.0:8080
@@ -67,30 +74,31 @@ docker run -d \
   "$image_ref" >/dev/null
 
 # Runtime identity/security contract: expected UID 101, read-only rootfs and NNP.
-test "$(docker inspect --format '{{.Config.User}}' "$gamja_container")" = "101"
-test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$gamja_container")" = "true"
-test "$(docker inspect --format '{{ index .HostConfig.SecurityOpt 0 }}' "$gamja_container")" = "no-new-privileges:true"
+actual_user="$(docker inspect --format '{{.Config.User}}' "$gamja_container")"
+[ "$actual_user" = "101" ] || fail "expected image user 101, got '$actual_user'"
+readonly_rootfs="$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$gamja_container")"
+[ "$readonly_rootfs" = "true" ] || fail "expected read-only root filesystem, got '$readonly_rootfs'"
+security_opts="$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$gamja_container")"
+grep -q 'no-new-privileges' <<<"$security_opts" || fail "no-new-privileges missing from SecurityOpt: $security_opts"
 
 # Wait for nginx/health without publishing a host port; probe from the same
 # network using the container IP so the exact release image remains isolated.
 for _ in $(seq 1 30); do
   health="$(docker inspect --format '{{.State.Health.Status}}' "$gamja_container")"
   [ "$health" = "healthy" ] && break
-  if [ "$health" = "unhealthy" ]; then
-    docker logs "$gamja_container" >&2 || true
-    exit 1
-  fi
+  [ "$health" != "unhealthy" ] || fail "container health became unhealthy"
   sleep 1
 done
-test "$(docker inspect --format '{{.State.Health.Status}}' "$gamja_container")" = "healthy"
+health="$(docker inspect --format '{{.State.Health.Status}}' "$gamja_container")"
+[ "$health" = "healthy" ] || fail "container did not become healthy; final health='$health'"
 
 gamja_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$gamja_container")"
-test -n "$gamja_ip"
+[ -n "$gamja_ip" ] || fail "container has no network IP"
 
-curl --fail --silent --show-error "http://$gamja_ip:8080/" >"$index_file"
-curl --fail --silent --show-error "http://$gamja_ip:8080/config.json" >"$config_file"
-grep -q '<title>gamja IRC client</title>' "$index_file"
-grep -q '"url": "/socket"' "$config_file"
+curl --fail --silent --show-error "http://$gamja_ip:8080/" >"$index_file" || fail "Gamja index probe failed"
+curl --fail --silent --show-error "http://$gamja_ip:8080/config.json" >"$config_file" || fail "Gamja config probe failed"
+grep -q '<title>gamja IRC client</title>' "$index_file" || fail "Gamja index title mismatch"
+grep -q '"url": "/socket"' "$config_file" || fail "generated config does not target /socket"
 
 # A real RFC 6455 upgrade through Gamja/nginx to soju proves the release
 # artifact's built-in /socket proxy path, not merely static-file serving.
@@ -102,9 +110,9 @@ curl --http1.1 --max-time 2 --silent --show-error \
   -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
   "http://$gamja_ip:8080/socket" || true
 
-grep -Eq '^HTTP/1\.[01] 101 ' "$headers_file"
-grep -qi '^Upgrade: websocket' "$headers_file"
-grep -qi '^Connection: upgrade' "$headers_file"
+grep -Eq '^HTTP/1\.[01] 101 ' "$headers_file" || fail "WebSocket proxy did not return HTTP 101"
+grep -qi '^Upgrade: websocket' "$headers_file" || fail "WebSocket Upgrade response header missing"
+grep -qi '^Connection: upgrade' "$headers_file" || fail "WebSocket Connection upgrade response header missing"
 
 echo "release_runtime=verified"
 echo "image=$image_ref"
