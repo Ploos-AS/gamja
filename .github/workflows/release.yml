@@ -131,7 +131,14 @@ jobs:
           ./scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256
           echo 'M1.15 consumer verifier accepted the exact release evidence and OCI artifact before publication.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Qualify M1.16 exact release runtime
+      - name: Set up QEMU for M1.17 runtime qualification
+        if: steps.meta.outputs.eligible == 'true'
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4, Node 24
+        with:
+          image: docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+
+      - name: Qualify M1.17 exact release runtime on amd64 and arm64
         if: steps.meta.outputs.eligible == 'true'
         env:
           DIGEST: ${{ steps.meta.outputs.digest }}
@@ -139,8 +146,9 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./scripts/qualify-release-runtime.sh
-          ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"
-          echo 'M1.16 release gate: exact immutable OCI digest passed non-root/read-only health, config and real WebSocket runtime qualification.' >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/amd64
+          ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/arm64
+          echo 'M1.17 release gate: exact immutable OCI digest passed non-root/read-only health, config and real WebSocket runtime qualification on amd64 and arm64.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
@@ -173,7 +181,7 @@ jobs:
           - Cosign keyless signature verified for the exact release digest before GitHub Release creation
           - machine-readable M1.14 release evidence plus SHA-256 checksum attached to this release
           - M1.15 consumer verifier qualified against the same evidence, signature and attestations before publication
-          - M1.16 exact release digest executed and qualified non-root/read-only with health, generated config and real soju WebSocket upgrade
+          - M1.17 exact release digest executed and qualified non-root/read-only with health, generated config and real soju WebSocket upgrade on both amd64 and arm64
 
           Container image:
           \`$IMAGE\`
