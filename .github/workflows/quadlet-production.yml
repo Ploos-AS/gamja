@@ -1,0 +1,120 @@
+name: quadlet-production
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quadlet-production-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          podman --version
+
+      - name: Build local Gamja image
+        run: |
+          sudo podman build -t ghcr.io/ploos-as/gamja:latest .
+
+      - name: Install production Quadlets
+        run: |
+          sudo mkdir -p /etc/gamja /etc/containers/systemd
+          sudo cp examples/quadlet-production/soju.conf examples/quadlet-production/Caddyfile /etc/gamja/
+          cat <<'EOF' | sudo tee /etc/gamja/gamja.env >/dev/null
+          GAMJA_DOMAIN=localhost
+          GAMJA_AUTH=optional
+          GAMJA_AUTOJOIN=
+          GAMJA_NICK=
+          GAMJA_AUTOCONNECT=
+          GAMJA_PING=
+          GAMJA_OAUTH2_URL=
+          GAMJA_OAUTH2_CLIENT_ID=
+          GAMJA_OAUTH2_CLIENT_SECRET=
+          GAMJA_OAUTH2_SCOPE=
+          EOF
+          sudo cp examples/quadlet-production/*.container /etc/containers/systemd/
+          sudo cp examples/quadlet-production/*.network /etc/containers/systemd/
+          sudo cp examples/quadlet-production/*.volume /etc/containers/systemd/
+          sudo systemctl daemon-reload
+
+      - name: Verify generated Quadlet services
+        run: |
+          set -euo pipefail
+          systemctl cat soju.service >/dev/null
+          systemctl cat gamja.service >/dev/null
+          systemctl cat caddy.service >/dev/null
+
+      - name: Start generated Quadlet stack
+        run: |
+          sudo systemctl start caddy.service
+          systemctl is-active --quiet soju.service
+          systemctl is-active --quiet gamja.service
+          systemctl is-active --quiet caddy.service
+
+      - name: Verify health and port isolation
+        run: |
+          set -euo pipefail
+          for name in soju gamja gamja-caddy; do
+            for i in {1..60}; do
+              status="$(sudo podman inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name")"
+              [ "$status" = healthy ] && break
+              sleep 1
+            done
+            test "$(sudo podman inspect --format '{{.State.Health.Status}}' "$name")" = healthy
+          done
+          sudo podman port soju | grep -q '^$' || test -z "$(sudo podman port soju)"
+          sudo podman port gamja | grep -q '^$' || test -z "$(sudo podman port gamja)"
+          sudo podman port gamja-caddy | grep -q '80/tcp'
+          sudo podman port gamja-caddy | grep -q '443/tcp'
+
+      - name: Verify HTTPS application
+        run: |
+          set -euo pipefail
+          for i in {1..60}; do
+            if curl -kfsS https://localhost/ >/tmp/m15-index.html; then break; fi
+            sleep 1
+          done
+          grep -q '<title>gamja IRC client</title>' /tmp/m15-index.html
+
+      - name: Verify WSS through Quadlet stack
+        run: |
+          set -euo pipefail
+          headers=/tmp/m15-wss-headers
+          curl -k --http1.1 --max-time 2 --silent --show-error \
+            -D "$headers" -o /tmp/m15-wss-body \
+            -H 'Connection: Upgrade' \
+            -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            https://localhost/socket || true
+          cat "$headers"
+          grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
+          grep -qi '^Upgrade: websocket' "$headers"
+          grep -qi '^Connection: upgrade' "$headers"
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          sudo systemctl status soju.service gamja.service caddy.service --no-pager || true
+          sudo journalctl -u soju.service -u gamja.service -u caddy.service --no-pager -n 200 || true
+          sudo podman ps -a || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo systemctl stop caddy.service gamja.service soju.service || true
+          sudo podman rm -f gamja-caddy gamja soju || true
+          sudo podman volume rm -f gamja-caddy-config gamja-caddy-data gamja-soju-data || true
