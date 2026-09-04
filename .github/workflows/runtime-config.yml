@@ -79,19 +79,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if docker run --rm -e GAMJA_AUTH=bogus gamja:runtime-config; then
-            echo 'invalid GAMJA_AUTH unexpectedly succeeded' >&2
-            exit 1
-          fi
-          if docker run --rm -e GAMJA_AUTOCONNECT=yes gamja:runtime-config; then
-            echo 'invalid GAMJA_AUTOCONNECT unexpectedly succeeded' >&2
-            exit 1
-          fi
-          if docker run --rm -e GAMJA_PING=-1 gamja:runtime-config; then
-            echo 'invalid GAMJA_PING unexpectedly succeeded' >&2
-            exit 1
-          fi
-          if docker run --rm -e 'GAMJA_AUTOJOIN=#one,,#two' gamja:runtime-config; then
-            echo 'invalid GAMJA_AUTOJOIN unexpectedly succeeded' >&2
-            exit 1
-          fi
+
+          expect_reject() {
+            label="$1"
+            shift
+            set +e
+            timeout 5s docker run --rm "$@" gamja:runtime-config
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              echo "$label unexpectedly succeeded" >&2
+              exit 1
+            fi
+            if [ "$rc" -eq 124 ]; then
+              echo "$label started the service instead of being rejected" >&2
+              exit 1
+            fi
+          }
+
+          expect_reject 'invalid GAMJA_AUTH' -e GAMJA_AUTH=bogus
+          expect_reject 'invalid GAMJA_AUTOCONNECT' -e GAMJA_AUTOCONNECT=yes
+          expect_reject 'invalid GAMJA_PING' -e GAMJA_PING=-1
+          expect_reject 'invalid GAMJA_AUTOJOIN' -e 'GAMJA_AUTOJOIN=#one,,#two'
