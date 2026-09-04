@@ -1,0 +1,8 @@
+# Replace chat.example.com with the public hostname for your Gamja instance.
+chat.example.com {
+    encode zstd gzip
+
+    # Caddy supports WebSocket upgrades automatically and forwards the
+    # original Host plus X-Forwarded-* headers by default.
+    reverse_proxy gamja:8080
+}
