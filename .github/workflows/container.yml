@@ -164,9 +164,14 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: |
+            index,manifest:org.opencontainers.image.title=Gamja
+            index,manifest:org.opencontainers.image.description=Minimal non-root container for the Gamja IRC web client
+            index,manifest:org.opencontainers.image.source=https://github.com/Ploos-AS/gamja
+            index,manifest:org.opencontainers.image.licenses=AGPL-3.0-only
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          sbom: ${{ github.event_name != 'pull_request' }}
+          sbom: ${{ github.event_name != 'pull_request' && 'generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9' || 'false' }}
           provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
 
       - name: Verify published multi-arch manifest
@@ -184,6 +189,8 @@ jobs:
           docker buildx imagetools inspect --raw "$image" > /tmp/manifest.json
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")' /tmp/manifest.json
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' /tmp/manifest.json
+          jq -e '.annotations["org.opencontainers.image.licenses"] == "AGPL-3.0-only"' /tmp/manifest.json
+          jq -e '.annotations["org.opencontainers.image.source"] == "https://github.com/Ploos-AS/gamja"' /tmp/manifest.json
           digest="$IMAGE_DIGEST"
           test -n "$digest"
           echo "Published digest: $digest"
@@ -193,8 +200,9 @@ jobs:
           echo "Digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Platforms: \`linux/amd64\`, \`linux/arm64\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "OCI license: \`AGPL-3.0-only\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "OCI license: \`AGPL-3.0-only\` (label + index/manifest annotation)" >> "$GITHUB_STEP_SUMMARY"
           echo "QEMU/binfmt: \`qemu-v10.2.3\` (arm64 only)" >> "$GITHUB_STEP_SUMMARY"
           echo "BuildKit: \`v0.32.2\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "SBOM: enabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "Dockerfile frontend: \`docker/dockerfile:1.7@sha256:a57df69d...\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "SBOM generator: \`docker/buildkit-syft-scanner@sha256:ae4f3b55...\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Provenance: mode=max" >> "$GITHUB_STEP_SUMMARY"
