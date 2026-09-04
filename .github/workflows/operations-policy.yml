@@ -28,21 +28,21 @@ jobs:
       - name: Verify resource guardrails and log rotation
         run: |
           set -euo pipefail
-          jq -e '.services.soju.cpus == 1 and .services.soju.mem_limit == 268435456 and .services.soju.pids_limit == 256' /tmp/m16-compose.json
-          jq -e '.services.gamja.cpus == 0.5 and .services.gamja.mem_limit == 134217728 and .services.gamja.pids_limit == 128' /tmp/m16-compose.json
-          jq -e '.services.caddy.cpus == 1 and .services.caddy.mem_limit == 268435456 and .services.caddy.pids_limit == 256' /tmp/m16-compose.json
+          jq -e '(.services.soju.cpus|tonumber) == 1 and (.services.soju.mem_limit|tonumber) == 268435456 and (.services.soju.pids_limit|tonumber) == 256' /tmp/m16-compose.json
+          jq -e '(.services.gamja.cpus|tonumber) == 0.5 and (.services.gamja.mem_limit|tonumber) == 134217728 and (.services.gamja.pids_limit|tonumber) == 128' /tmp/m16-compose.json
+          jq -e '(.services.caddy.cpus|tonumber) == 1 and (.services.caddy.mem_limit|tonumber) == 268435456 and (.services.caddy.pids_limit|tonumber) == 256' /tmp/m16-compose.json
           for service in soju gamja caddy; do
             jq -e --arg service "$service" '.services[$service].logging.driver == "json-file"' /tmp/m16-compose.json
-            jq -e --arg service "$service" '.services[$service].logging.options["max-size"] == "10m"' /tmp/m16-compose.json
-            jq -e --arg service "$service" '.services[$service].logging.options["max-file"] == "3"' /tmp/m16-compose.json
+            jq -e --arg service "$service" '(.services[$service].logging.options["max-size"]|tostring) == "10m"' /tmp/m16-compose.json
+            jq -e --arg service "$service" '(.services[$service].logging.options["max-file"]|tostring) == "3"' /tmp/m16-compose.json
           done
 
       - name: Verify shutdown policy and operational docs
         run: |
           set -euo pipefail
-          jq -e '.services.soju.stop_grace_period == "30s"' /tmp/m16-compose.json
-          jq -e '.services.gamja.stop_grace_period == "15s"' /tmp/m16-compose.json
-          jq -e '.services.caddy.stop_grace_period == "30s"' /tmp/m16-compose.json
+          jq -e '(.services.soju.stop_grace_period|tostring) == "30s" or (.services.soju.stop_grace_period|tonumber) == 30000000000' /tmp/m16-compose.json
+          jq -e '(.services.gamja.stop_grace_period|tostring) == "15s" or (.services.gamja.stop_grace_period|tonumber) == 15000000000' /tmp/m16-compose.json
+          jq -e '(.services.caddy.stop_grace_period|tostring) == "30s" or (.services.caddy.stop_grace_period|tonumber) == 30000000000' /tmp/m16-compose.json
           test -s examples/production/OPERATIONS.md
           grep -q 'docker compose logs -f' examples/production/OPERATIONS.md
           grep -q 'docker stats' examples/production/OPERATIONS.md
