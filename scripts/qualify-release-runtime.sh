@@ -39,6 +39,11 @@ body_file="$(mktemp)"
 cleanup() {
   docker rm -f "$gamja_container" "$soju_container" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
+  # Docker's classic image store cannot keep two different platform resolutions
+  # of the same multi-platform index digest at once. Drop only the local cache
+  # references so a following qualification can pull the same immutable index
+  # for another platform without changing the registry identity being tested.
+  docker image rm -f "$image_ref" "$soju_image" >/dev/null 2>&1 || true
   rm -f "$soju_config" "$index_file" "$config_file" "$headers_file" "$body_file"
 }
 trap cleanup EXIT
@@ -60,7 +65,10 @@ chmod 0644 "$soju_config"
 
 # Pull the immutable multi-platform index identity explicitly, selecting the
 # requested platform manifest. linux/arm64 is expected to run under registered
-# binfmt/QEMU when the host runner is amd64.
+# binfmt/QEMU when the host runner is amd64. Clear stale local resolutions first
+# because Docker's classic image store permits only one selected platform for an
+# index digest at a time; this does not alter the immutable registry digest.
+docker image rm -f "$image_ref" "$soju_image" >/dev/null 2>&1 || true
 docker pull --platform "$platform" "$image_ref" >/dev/null
 docker pull --platform "$platform" "$soju_image" >/dev/null
 
