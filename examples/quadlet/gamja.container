@@ -1,0 +1,21 @@
+[Unit]
+Description=Gamja web IRC client
+After=irc-network.service soju.service
+Requires=irc-network.service soju.service
+
+[Container]
+Image=ghcr.io/ploos-as/gamja:latest
+ContainerName=gamja
+Network=gamja-irc
+Environment=SOJU_HOST=soju
+Environment=SOJU_PORT=8080
+PublishPort=8080:8080
+ReadOnly=true
+Tmpfs=/tmp
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
