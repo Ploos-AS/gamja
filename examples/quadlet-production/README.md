@@ -1,6 +1,6 @@
 # Production Podman/Quadlet deployment
 
-M1.5 mirrors the Docker Compose production architecture with system-level Podman Quadlet units:
+M1.5 mirrors the Docker Compose production architecture with system-level Podman Quadlet units. M1.6 adds an operations baseline with journald logging, resource guardrails, restart policy and explicit shutdown windows.
 
 ```text
 Internet :80/:443
@@ -39,6 +39,40 @@ sudo podman exec -it soju sojudb -config /etc/soju/config create-user <username>
 sudo systemctl restart soju.service
 ```
 
+## M1.6 operations baseline
+
+The generated containers log to journald. Follow the complete stack with:
+
+```sh
+sudo journalctl -f -u caddy.service -u gamja.service -u soju.service
+```
+
+Recent logs for one component:
+
+```sh
+sudo journalctl -u gamja.service --since '30 minutes ago'
+```
+
+Resource guardrails are:
+
+| Service | CPU quota | Memory | PIDs | Stop timeout |
+| --- | ---: | ---: | ---: | ---: |
+| soju | 100% | 256 MiB | 256 | 30s |
+| Gamja | 50% | 128 MiB | 128 | 15s |
+| Caddy | 100% | 256 MiB | 256 | 30s |
+
+These are small-installation defaults, not sizing guarantees. Adjust them after observing real usage.
+
+Inspect systemd policy and live Podman state:
+
+```sh
+systemctl status soju.service gamja.service caddy.service
+systemctl show soju.service gamja.service caddy.service -p CPUQuotaPerSecUSec -p MemoryMax
+sudo podman stats
+```
+
+All three services use `Restart=on-failure` with a 3-second restart delay. M1.6 CI kills the Gamja container deliberately and verifies that systemd recreates it, health returns to `healthy`, and HTTPS remains usable.
+
 ## Ubuntu 24.04 and no-new-privileges
 
 The Quadlet example deliberately does not set `NoNewPrivileges=true`. Ubuntu 24.04's packaged Podman 4.9.3/crun combination is affected by an AppArmor interaction where containers launched with `--security-opt=no-new-privileges` can be denied creation of normal TCP sockets, including an unprivileged listener on port 8080. M1.5 runtime qualification reproduced this behavior with both soju and Gamja.
@@ -59,4 +93,4 @@ The Soju and Caddy dependency images are pinned by OCI index digest. The Gamja i
 
 ## Validation
 
-M1.5 CI installs Podman on Ubuntu 24.04, runs the Quadlet generator, starts the generated systemd units, and verifies service ordering, health, private application ports, HTTPS delivery and WSS upgrade through Caddy -> Gamja -> soju.
+M1.6 CI installs Podman on Ubuntu 24.04, runs the Quadlet generator, verifies logging/resource/restart settings in the generated units, starts the real systemd stack, and verifies service ordering, health, private application ports, HTTPS delivery, WSS upgrade and restart recovery through Caddy -> Gamja -> soju.
