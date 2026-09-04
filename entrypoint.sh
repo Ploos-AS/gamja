@@ -60,6 +60,15 @@ if [ -n "$GAMJA_PING" ]; then
   esac
 fi
 
+if [ -n "$GAMJA_AUTOJOIN" ]; then
+  case "$GAMJA_AUTOJOIN" in
+    ,*|*,|*,,*)
+      echo "GAMJA_AUTOJOIN contains an empty channel" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 validate_text() {
   name="$1"
   value="$2"
