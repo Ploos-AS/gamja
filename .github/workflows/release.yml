@@ -33,52 +33,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           chmod +x ./scripts/validate-release-tag.sh
           if ! version="$(./scripts/validate-release-tag.sh "$TAG")"; then
             echo "Ignoring invalid or OCI-incompatible release tag: $TAG"
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          # Resolve both lightweight and annotated tags to the commit they name.
           ref_json="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")"
           object_type="$(jq -r '.object.type' <<<"$ref_json")"
           object_sha="$(jq -r '.object.sha' <<<"$ref_json")"
           case "$object_type" in
-            commit)
-              tag_commit="$object_sha"
-              ;;
+            commit) tag_commit="$object_sha" ;;
             tag)
               tag_json="$(gh api "/repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
               tag_commit="$(jq -r 'select(.object.type == "commit") | .object.sha' <<<"$tag_json")"
               ;;
-            *)
-              echo "Release ref $TAG does not resolve to a commit" >&2
-              exit 1
-              ;;
+            *) echo "Release ref $TAG does not resolve to a commit" >&2; exit 1 ;;
           esac
-
           test -n "$tag_commit"
           if [ "$tag_commit" != "$WORKFLOW_COMMIT" ]; then
             echo "Release integrity failure: tag $TAG resolves to $tag_commit, container workflow built $WORKFLOW_COMMIT" >&2
             exit 1
           fi
-
           image="$REGISTRY/$IMAGE_NAME:$version"
-
           token="$(curl -fsSL "https://ghcr.io/token?scope=repository:$IMAGE_NAME:pull" | jq -r .token)"
-          manifest="$(curl -fsSL \
-            -H "Authorization: Bearer $token" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-            "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version")"
-          digest="$(curl -fsSI \
-            -H "Authorization: Bearer $token" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
-            "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version" \
-            | tr -d '\r' \
-            | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2; exit}')"
-
+          manifest="$(curl -fsSL -H "Authorization: Bearer $token" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version")"
+          digest="$(curl -fsSI -H "Authorization: Bearer $token" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version" | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2; exit}')"
           test -n "$digest"
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")' <<<"$manifest" >/dev/null
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' <<<"$manifest" >/dev/null
@@ -87,13 +67,31 @@ jobs:
             echo "Release integrity failure: OCI revision '$image_revision' != release commit '$WORKFLOW_COMMIT'" >&2
             exit 1
           fi
-
           echo "eligible=true" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "release_commit=$WORKFLOW_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: steps.meta.outputs.eligible == 'true'
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      - name: Verify signed release image
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          DIGEST: ${{ steps.meta.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DIGEST"
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/tags/v.*$' \
+            "ghcr.io/ploos-as/gamja@$DIGEST" >/tmp/release-cosign-verification.json
+          jq -e 'length > 0' /tmp/release-cosign-verification.json >/dev/null
+          echo 'M1.12 release gate: keyless signature verified for exact release digest.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
@@ -107,12 +105,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists; nothing to do."
             exit 0
           fi
-
           cat > /tmp/release-notes.md <<EOF
           Ploos-AS container release for Gamja.
 
@@ -125,6 +121,7 @@ jobs:
           - multi-architecture OCI image for \`linux/amd64\` and \`linux/arm64\`
           - SBOM and BuildKit provenance (mode=max)
           - OCI revision annotation verified against the exact release tag commit
+          - Cosign keyless signature verified for the exact release digest before GitHub Release creation
 
           Container image:
           \`$IMAGE\`
@@ -135,9 +132,4 @@ jobs:
           Release commit:
           \`$RELEASE_COMMIT\`
           EOF
-
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Gamja container $TAG" \
-            --notes-file /tmp/release-notes.md \
-            --verify-tag
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Gamja container $TAG" --notes-file /tmp/release-notes.md --verify-tag
