@@ -63,7 +63,7 @@ docker run -d \
   --network "$network" \
   --network-alias soju \
   --read-only \
-  --tmpfs /var/lib/soju:rw,noexec,nosuid,nodev \
+  --tmpfs /var/lib/soju:rw,noexec,nosuid,nodev,uid=1000,gid=1000,mode=0700 \
   --security-opt no-new-privileges:true \
   -v "$soju_config:/etc/soju/release-runtime.conf:ro" \
   "$soju_image" -config /etc/soju/release-runtime.conf >/dev/null
