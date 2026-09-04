@@ -27,21 +27,21 @@ jobs:
         run: |
           set -euo pipefail
           docker run -d --name gamja-default -p 18082:8080 --read-only --tmpfs /tmp gamja:runtime-config
-          trap 'docker rm -f gamja-default gamja-custom >/dev/null 2>&1 || true' EXIT
+          trap 'docker rm -f gamja-default gamja-custom gamja-oauth >/dev/null 2>&1 || true' EXIT
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:18082/config.json >/tmp/default.json; then break; fi
             sleep 1
           done
           jq -e '.server == {url:"/socket",auth:"optional"}' /tmp/default.json
 
-      - name: Verify environment overrides
+      - name: Verify environment overrides and multi-channel autojoin
         shell: bash
         run: |
           set -euo pipefail
           docker run -d --name gamja-custom -p 18083:8080 --read-only --tmpfs /tmp \
             -e GAMJA_SERVER_URL='wss://irc.example.org/socket' \
             -e GAMJA_AUTH=mandatory \
-            -e GAMJA_AUTOJOIN='#gamja' \
+            -e 'GAMJA_AUTOJOIN=#gamja, #soju, #ircv3' \
             -e GAMJA_NICK='guest*' \
             -e GAMJA_AUTOCONNECT=true \
             -e GAMJA_PING=30 \
@@ -52,10 +52,28 @@ jobs:
           done
           jq -e '.server.url == "wss://irc.example.org/socket"' /tmp/custom.json
           jq -e '.server.auth == "mandatory"' /tmp/custom.json
-          jq -e '.server.autojoin == "#gamja"' /tmp/custom.json
+          jq -e '.server.autojoin == ["#gamja","#soju","#ircv3"]' /tmp/custom.json
           jq -e '.server.nick == "guest*"' /tmp/custom.json
           jq -e '.server.autoconnect == true' /tmp/custom.json
           jq -e '.server.ping == 30' /tmp/custom.json
+
+      - name: Verify OAuth2 runtime configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name gamja-oauth -p 18084:8080 --read-only --tmpfs /tmp \
+            -e GAMJA_AUTH=oauth2 \
+            -e GAMJA_OAUTH2_URL='https://auth.example.org' \
+            -e GAMJA_OAUTH2_CLIENT_ID='gamja-web' \
+            -e GAMJA_OAUTH2_CLIENT_SECRET='demo-secret' \
+            -e GAMJA_OAUTH2_SCOPE='openid profile irc' \
+            gamja:runtime-config
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:18084/config.json >/tmp/oauth.json; then break; fi
+            sleep 1
+          done
+          jq -e '.server.auth == "oauth2"' /tmp/oauth.json
+          jq -e '.oauth2 == {url:"https://auth.example.org",client_id:"gamja-web",client_secret:"demo-secret",scope:"openid profile irc"}' /tmp/oauth.json
 
       - name: Reject invalid runtime config
         shell: bash
@@ -71,5 +89,9 @@ jobs:
           fi
           if docker run --rm -e GAMJA_PING=-1 gamja:runtime-config; then
             echo 'invalid GAMJA_PING unexpectedly succeeded' >&2
+            exit 1
+          fi
+          if docker run --rm -e 'GAMJA_AUTOJOIN=#one,,#two' gamja:runtime-config; then
+            echo 'invalid GAMJA_AUTOJOIN unexpectedly succeeded' >&2
             exit 1
           fi
