@@ -17,12 +17,12 @@ A release candidate must satisfy all of the following on `main`:
 - upstream Gamja source is pinned by commit SHA
 - OCI license metadata is `AGPL-3.0-only`
 - OCI revision metadata is bound to the exact Git commit built by the workflow
-- SBOM generation and BuildKit provenance `mode=max` are enabled
 - the published OCI digest is keylessly signed by the repository's `container` workflow using GitHub Actions OIDC
+- SPDX SBOM and BuildKit SLSA provenance are present and structurally valid for linux/amd64 and linux/arm64
 
-M1.7 security policy is documented in `SECURITY.md`, M1.10 dependency policy in `DEPENDENCIES.md`, and M1.11 signing trust in `SIGNING.md`.
+M1.7 security policy is documented in `SECURITY.md`, M1.10 dependency policy in `DEPENDENCIES.md`, M1.11 signing trust in `SIGNING.md`, and M1.13 attestation policy in `ATTESTATIONS.md`.
 
-M1.8 binds the release tag, successful container workflow commit, and OCI revision to the same Git commit. M1.12 extends that chain: the exact OCI digest selected for release must also carry a valid Cosign keyless signature from `Ploos-AS/gamja/.github/workflows/container.yml` running on a version tag. GitHub Release creation is downstream of this verification and cannot proceed when signature verification fails.
+M1.8 binds the release tag, successful container workflow commit, and OCI revision to the same Git commit. M1.12 extends that chain to the exact Cosign-signed OCI digest. M1.13 further requires that the same digest expose valid SPDX SBOM and BuildKit SLSA provenance attestations for both supported platforms before GitHub Release creation.
 
 ## Versioning
 
@@ -50,20 +50,21 @@ Stable releases publish full version plus major/minor aliases. `latest` is publi
 7. requires OCI revision == release commit
 8. installs the SHA-pinned Cosign verifier
 9. verifies the exact digest against GitHub Actions OIDC and the tag-scoped `container.yml` workflow identity
-10. creates the matching GitHub Release only after every integrity/signature gate succeeds
+10. verifies SPDX SBOM and BuildKit SLSA provenance on the exact digest for amd64 and arm64
+11. creates the matching GitHub Release only after every integrity, signature and attestation gate succeeds
 
 The workflow is idempotent: an existing GitHub Release is not replaced.
 
-`.github/workflows/release-policy.yml` continuously qualifies the strict tag validator, M1.8 revision wiring, M1.12 Cosign identity constraints, and ordering of signature verification before release creation.
+`.github/workflows/release-policy.yml` continuously qualifies the strict tag validator, M1.8 revision wiring, M1.12 Cosign identity constraints, M1.13 attestation wiring, and ordering of all verification before release creation.
 
 ## Release steps
 
-1. Confirm all `main` qualification workflows are green.
+1. Confirm all `main` qualification workflows are green, including `attestations`.
 2. Confirm `main` is the intended release state.
 3. Create the annotated version tag from that exact commit.
 4. Wait for the tag-triggered `container` workflow to build, scan, publish, sign and self-verify the exact digest.
-5. The release workflow independently verifies tag -> workflow commit -> OCI revision -> signed digest identity.
+5. The release workflow independently verifies tag -> workflow commit -> OCI revision -> signed digest -> SBOM/provenance attestations.
 6. Only then is the GitHub Release created.
-7. Verify the GitHub Release, versioned image, platforms, OCI revision, signature, SBOM and provenance.
+7. Verify the GitHub Release, versioned image, platforms, OCI revision, signature, SPDX SBOM and BuildKit provenance.
 
 Published tags are immutable release artifacts. Fixes require a new semantic version.
