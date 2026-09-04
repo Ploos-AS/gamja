@@ -1,0 +1,79 @@
+name: release-runtime
+
+on:
+  workflow_run:
+    workflows: [container]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: release-runtime-${{ github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4, Node 24
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+      - name: Resolve exact main digest
+        id: image
+        env:
+          EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=ghcr.io/ploos-as/gamja:latest
+          digest=''
+          for attempt in {1..12}; do
+            if raw="$(docker buildx imagetools inspect --raw "$image" 2>/dev/null)"; then
+              revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // empty' <<<"$raw")"
+              if [ "$revision" = "$EXPECTED_REVISION" ]; then
+                digest="$(docker buildx imagetools inspect "$image" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
+                [ -n "$digest" ] && break
+              fi
+            fi
+            sleep 5
+          done
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Qualify exact published runtime digest
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/qualify-release-runtime.sh
+          ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"
+
+      - name: Record M1.16 release runtime status
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          {
+            echo '### M1.16 digest-bound release runtime qualification'
+            echo
+            echo "Digest: \`$DIGEST\`"
+            echo '- exact immutable OCI digest pulled and executed on linux/amd64'
+            echo '- explicit runtime UID 101 verified'
+            echo '- read-only root filesystem and no-new-privileges verified'
+            echo '- health check reached healthy'
+            echo '- Gamja index and generated /config.json verified'
+            echo '- real /socket WebSocket upgrade to pinned soju returned HTTP 101'
+          } >> "$GITHUB_STEP_SUMMARY"
