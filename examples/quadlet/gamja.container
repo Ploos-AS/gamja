@@ -9,6 +9,8 @@ ContainerName=gamja
 Network=gamja-irc
 Environment=SOJU_HOST=soju
 Environment=SOJU_PORT=8080
+Environment=GAMJA_SERVER_URL=/socket
+Environment=GAMJA_AUTH=optional
 PublishPort=8080:8080
 ReadOnly=true
 Tmpfs=/tmp
