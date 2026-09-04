@@ -44,8 +44,10 @@ jobs:
             if raw="$(docker buildx imagetools inspect --raw "$image" 2>/dev/null)"; then
               revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // empty' <<<"$raw")"
               if [ "$revision" = "$EXPECTED_REVISION" ]; then
-                digest="$(docker buildx imagetools inspect "$image" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
-                [ -n "$digest" ] && break
+                if inspect="$(docker buildx imagetools inspect "$image" 2>/dev/null)"; then
+                  digest="$(awk '/^Digest:/ {print $2; found=1} END {exit !found}' <<<"$inspect")"
+                  [ -n "$digest" ] && break
+                fi
               fi
             fi
             sleep 5
