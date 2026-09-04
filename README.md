@@ -23,6 +23,7 @@ Targets and production properties:
 - M1.13 digest-bound SBOM/provenance verification before release creation
 - M1.14 deterministic release evidence JSON plus SHA-256 checksum attached to releases
 - M1.15 one-command consumer release verification, enforced before and after publication
+- M1.16 digest-bound release runtime execution before GitHub Release creation
 - runtime Gamja configuration through environment variables
 - qualified HTTPS/WSS reverse proxies, production Compose and Podman Quadlet deployments
 
@@ -132,9 +133,11 @@ M1.14 emits deterministic `release-evidence.json` only after the release signatu
 
 M1.15 adds `scripts/verify-release.sh`, which validates the evidence checksum and semantics, OCI revision, exact tag-scoped Cosign identity, and both platform attestations. The release workflow must pass this consumer verifier before publication, and `release-verification` repeats it independently against the published release assets. See `RELEASE-EVIDENCE.md`.
 
+M1.16 adds `scripts/qualify-release-runtime.sh`. It rejects mutable image references and runs the exact OCI digest as UID 101 with a read-only root filesystem and `no-new-privileges`, requires a healthy state, checks the generated Gamja config, and performs a real `/socket` WebSocket upgrade to an immutably pinned soju image. The same gate runs continuously on the exact newly published `main` digest and blocks GitHub Release creation for version tags. See `RELEASE-RUNTIME.md`.
+
 ## CI qualification
 
-CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless signatures, digest-bound SBOM/provenance attestation verification, deterministic release-evidence generation, tamper rejection, and the consumer release-verification path.
+CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless signatures, digest-bound SBOM/provenance attestation verification, deterministic release-evidence generation, tamper rejection, the consumer release-verification path, and exact-digest M1.16 release runtime execution.
 
 ## Releases
 
@@ -146,7 +149,9 @@ Each new release carries `release-evidence.json` and `release-evidence.json.sha2
 ./scripts/verify-release.sh release-evidence.json release-evidence.json.sha256
 ```
 
-Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md`, attestation verification in `ATTESTATIONS.md`, and evidence plus consumer verification in `RELEASE-EVIDENCE.md`.
+Before the GitHub Release is created, that same exact digest must also pass M1.16 runtime qualification.
+
+Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md`, attestation verification in `ATTESTATIONS.md`, evidence plus consumer verification in `RELEASE-EVIDENCE.md`, and exact-digest runtime qualification in `RELEASE-RUNTIME.md`.
 
 ## License and upstream
 
