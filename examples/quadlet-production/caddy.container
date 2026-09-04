@@ -14,6 +14,9 @@ PublishPort=443:443/udp
 Volume=/etc/gamja/Caddyfile:/etc/caddy/Caddyfile:ro,Z
 Volume=caddy-data.volume:/data
 Volume=caddy-config.volume:/config
+LogDriver=journald
+Memory=256m
+PidsLimit=256
 HealthCmd=wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1
 HealthInterval=30s
 HealthTimeout=5s
@@ -23,6 +26,9 @@ HealthStartPeriod=10s
 [Service]
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do podman healthcheck run gamja >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
 Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+CPUQuota=100%
 
 [Install]
 WantedBy=multi-user.target
