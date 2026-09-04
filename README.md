@@ -52,7 +52,7 @@ Then open `http://localhost:8080`.
 Example override:
 
 ```sh
-GAMJA_NICK='guest*' GAMJA_AUTOJOIN='#gamja' GAMJA_AUTOCONNECT=true docker compose up -d
+GAMJA_NICK='guest*' GAMJA_AUTOJOIN='#gamja,#soju' GAMJA_AUTOCONNECT=true docker compose up -d
 ```
 
 ## Runtime configuration
@@ -70,12 +70,20 @@ Gamja variables:
 | --- | --- | --- |
 | `GAMJA_SERVER_URL` | `/socket` | WebSocket URL or path |
 | `GAMJA_AUTH` | `optional` | `mandatory`, `optional`, `disabled`, `external`, or `oauth2` |
-| `GAMJA_AUTOJOIN` | unset | Channel to join automatically |
+| `GAMJA_AUTOJOIN` | unset | One channel or a comma-separated channel list |
 | `GAMJA_NICK` | unset | Default nickname; `*` retains upstream random-suffix behavior |
 | `GAMJA_AUTOCONNECT` | unset | `true` or `false` |
 | `GAMJA_PING` | unset | Non-negative PING interval in seconds |
+| `GAMJA_OAUTH2_URL` | unset | OAuth 2.0 authorization server URL |
+| `GAMJA_OAUTH2_CLIENT_ID` | unset | OAuth 2.0 client ID |
+| `GAMJA_OAUTH2_CLIENT_SECRET` | unset | OAuth 2.0 client secret, when required by the deployment |
+| `GAMJA_OAUTH2_SCOPE` | unset | OAuth 2.0 scope |
 
-Unset optional variables are omitted from the generated JSON so Gamja keeps its upstream defaults. Invalid auth, boolean, port, ping, or control-character-containing text values cause the container to fail fast instead of serving malformed configuration.
+A single `GAMJA_AUTOJOIN` value is emitted as an upstream-compatible string. A comma-separated value such as `#gamja,#soju,#ircv3` is emitted as an array of strings.
+
+OAuth2 fields are emitted only when at least one `GAMJA_OAUTH2_*` variable is set. Because Gamja is a browser application, anything emitted into `/config.json`, including `client_secret`, is visible to the browser. Do not treat `GAMJA_OAUTH2_CLIENT_SECRET` as a server-side secret.
+
+Unset optional variables are omitted from the generated JSON so Gamja keeps its upstream defaults. Invalid auth, boolean, port, ping, empty entries in a multi-channel autojoin list, or control-character-containing text values cause the container to fail fast instead of serving malformed configuration.
 
 The generated nginx configuration and Gamja configuration both live under `/tmp`, preserving read-only-root-filesystem compatibility.
 
@@ -110,7 +118,7 @@ systemctl --user daemon-reload
 systemctl --user start gamja.service
 ```
 
-Additional `Environment=GAMJA_...` lines can be added to `gamja.container` for runtime overrides.
+Additional `Environment=GAMJA_...` lines can be added to `gamja.container` for runtime overrides, including OAuth2 fields.
 
 ## Build locally
 
@@ -139,7 +147,9 @@ CI validates:
 - read-only root filesystem
 - health check
 - default generated Gamja configuration
-- all supported M1.0 environment overrides
+- M1.0 server/runtime overrides
+- M1.1 multi-channel autojoin
+- M1.1 OAuth2 configuration generation
 - rejection of invalid runtime configuration
 - a real WebSocket upgrade through `Gamja -> nginx /socket -> soju`
 - published linux/amd64 and linux/arm64 OCI manifests
