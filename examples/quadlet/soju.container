@@ -1,0 +1,19 @@
+[Unit]
+Description=soju IRC bouncer for Gamja
+After=irc-network.service
+Requires=irc-network.service
+
+[Container]
+Image=ghcr.io/ploos-as/soju:latest
+ContainerName=soju
+Network=gamja-irc
+Exec=-config /etc/soju/config
+Volume=%h/.local/share/gamja-soju/soju.conf:/etc/soju/config:ro,Z
+Volume=%h/.local/share/gamja-soju/data:/var/lib/soju:Z
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
