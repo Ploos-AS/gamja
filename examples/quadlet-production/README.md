@@ -39,6 +39,14 @@ sudo podman exec -it soju sojudb -config /etc/soju/config create-user <username>
 sudo systemctl restart soju.service
 ```
 
+## Ubuntu 24.04 and no-new-privileges
+
+The Quadlet example deliberately does not set `NoNewPrivileges=true`. Ubuntu 24.04's packaged Podman 4.9.3/crun combination is affected by an AppArmor interaction where containers launched with `--security-opt=no-new-privileges` can be denied creation of normal TCP sockets, including an unprivileged listener on port 8080. M1.5 runtime qualification reproduced this behavior with both soju and Gamja.
+
+This limitation is specific to the Podman/Ubuntu runtime path. The Docker Compose production deployment retains `no-new-privileges:true`. The Quadlet deployment still keeps Gamja non-root and read-only, keeps Soju and Gamja off host ports, and uses systemd/Podman health ordering.
+
+Re-evaluate this omission when deploying on a Podman/crun/AppArmor version where the Ubuntu issue is fixed.
+
 ## Persistence
 
 Quadlet-managed named volumes are:
