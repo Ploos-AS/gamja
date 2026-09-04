@@ -1,0 +1,126 @@
+name: reverse-proxy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reverse-proxy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Build Gamja image
+        run: docker build -t gamja:m12 .
+
+      - name: Start Gamja and soju
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/soju-m12.conf <<'EOF'
+          db sqlite3 /var/lib/soju/main.db
+          listen http+insecure://0.0.0.0:8080
+          EOF
+
+          docker network create gamja-m12
+          docker run -d --name soju-m12 \
+            --network gamja-m12 --network-alias soju \
+            -v /tmp/soju-m12.conf:/etc/soju/m12.conf:ro \
+            ghcr.io/ploos-as/soju:latest \
+            -config /etc/soju/m12.conf
+
+          docker run -d --name gamja-m12 \
+            --network gamja-m12 --network-alias gamja \
+            --read-only --tmpfs /tmp \
+            --security-opt no-new-privileges:true \
+            gamja:m12
+
+      - name: Qualify Caddy WebSocket proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed 's/^chat\.example\.com {/:8080 {/' examples/reverse-proxy/Caddyfile >/tmp/Caddyfile
+
+          docker run -d --name caddy-m12 \
+            --network gamja-m12 \
+            -p 18085:8080 \
+            -v /tmp/Caddyfile:/etc/caddy/Caddyfile:ro \
+            caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:18085/ >/dev/null; then break; fi
+            sleep 1
+          done
+
+          headers=/tmp/caddy-ws-headers
+          curl --http1.1 --max-time 2 --silent --show-error \
+            -D "$headers" -o /tmp/caddy-ws-body \
+            -H 'Connection: Upgrade' \
+            -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            http://127.0.0.1:18085/socket || true
+
+          cat "$headers"
+          grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
+          grep -qi '^Upgrade: websocket' "$headers"
+          docker rm -f caddy-m12
+
+      - name: Qualify nginx HTTPS/WSS proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/nginx-m12/tls
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=chat.example.com' \
+            -keyout /tmp/nginx-m12/tls/privkey.pem \
+            -out /tmp/nginx-m12/tls/fullchain.pem >/dev/null 2>&1
+
+          cp examples/reverse-proxy/nginx.conf /tmp/nginx-m12/default.conf
+
+          docker run -d --name nginx-m12 \
+            --network gamja-m12 \
+            -p 18443:443 \
+            -v /tmp/nginx-m12/default.conf:/etc/nginx/conf.d/default.conf:ro \
+            -v /tmp/nginx-m12/tls:/etc/nginx/tls:ro \
+            nginx:1.29.8-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+
+          for i in {1..30}; do
+            if curl -kfsS --resolve chat.example.com:18443:127.0.0.1 \
+              https://chat.example.com:18443/ >/dev/null; then break; fi
+            sleep 1
+          done
+
+          headers=/tmp/nginx-ws-headers
+          curl -k --http1.1 --max-time 2 --silent --show-error \
+            --resolve chat.example.com:18443:127.0.0.1 \
+            -D "$headers" -o /tmp/nginx-ws-body \
+            -H 'Connection: Upgrade' \
+            -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            https://chat.example.com:18443/socket || true
+
+          cat "$headers"
+          grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
+          grep -qi '^Upgrade: websocket' "$headers"
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          docker logs caddy-m12 2>/dev/null || true
+          docker logs nginx-m12 2>/dev/null || true
+          docker logs gamja-m12 2>/dev/null || true
+          docker logs soju-m12 2>/dev/null || true
+          docker rm -f caddy-m12 nginx-m12 gamja-m12 soju-m12 2>/dev/null || true
+          docker network rm gamja-m12 2>/dev/null || true
