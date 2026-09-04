@@ -10,16 +10,8 @@ fi
 
 # OCI/Docker tags cannot contain SemVer build metadata (+...). Keep release
 # refs intentionally stricter than generic SemVer so every accepted Git tag
-# maps losslessly to the published image tag.
-case "$tag" in
-    v0|v0.*) ;;
-    v[1-9][0-9]*|v[1-9][0-9]*.*) ;;
-    *)
-        echo "invalid release tag: $tag" >&2
-        exit 1
-        ;;
-esac
-
+# maps losslessly to the published image tag. The numeric expressions also
+# enforce SemVer's no-leading-zero rule for major/minor/patch.
 if ! printf '%s\n' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
     echo "invalid release tag: $tag" >&2
     exit 1
