@@ -8,6 +8,7 @@ Network=irc.network
 Exec=-config /etc/soju/config
 Volume=/etc/gamja/soju.conf:/etc/soju/config:ro,Z
 Volume=soju-data.volume:/var/lib/soju
+AddCapability=NET_BIND_SERVICE
 HealthCmd=sojudb -config /etc/soju/config help
 HealthInterval=30s
 HealthTimeout=5s
