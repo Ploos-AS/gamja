@@ -1,0 +1,107 @@
+name: release
+
+on:
+  workflow_run:
+    workflows: [container]
+    types: [completed]
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ploos-as/gamja
+
+jobs:
+  release:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.workflow_run.head_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Ignoring non-semver tag: $TAG"
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          version="${TAG#v}"
+          image="$REGISTRY/$IMAGE_NAME:$version"
+
+          # Verify the tag exists before producing a release.
+          gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null
+
+          # Resolve the published OCI index digest from GHCR.
+          token="$(curl -fsSL "https://ghcr.io/token?scope=repository:$IMAGE_NAME:pull" | jq -r .token)"
+          digest="$(curl -fsSI \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version" \
+            | tr -d '\r' \
+            | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2; exit}')"
+
+          test -n "$digest"
+
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "release_commit=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release if missing
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          RELEASE_COMMIT: ${{ steps.meta.outputs.release_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to do."
+            exit 0
+          fi
+
+          cat > /tmp/release-notes.md <<EOF
+          Ploos-AS container release for Gamja.
+
+          Highlights:
+          - non-root nginx runtime on port 8080
+          - read-only-root-filesystem friendly runtime
+          - built-in \`/socket\` WebSocket proxy to soju
+          - runtime-configurable \`SOJU_HOST\` and \`SOJU_PORT\`
+          - Docker Compose and rootless Podman Quadlet examples
+          - verified Gamja -> nginx -> soju WebSocket upgrade
+          - multi-architecture OCI image for \`linux/amd64\` and \`linux/arm64\`
+          - SBOM and BuildKit provenance (mode=max)
+
+          Container image:
+          \`$IMAGE\`
+
+          OCI index digest:
+          \`$DIGEST\`
+
+          Release commit:
+          \`$RELEASE_COMMIT\`
+          EOF
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Gamja container $TAG" \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag
