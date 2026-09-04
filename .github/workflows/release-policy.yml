@@ -87,17 +87,49 @@ jobs:
           release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
           test "$evidence_line" -lt "$release_line"
 
+      - name: Qualify M1.15 consumer verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-release-evidence.sh ./scripts/verify-release.sh
+          export TAG=v1.2.3 VERSION=1.2.3 IMAGE=ghcr.io/ploos-as/gamja:1.2.3
+          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          ./scripts/create-release-evidence.sh /tmp/release-evidence.json
+          (cd /tmp && sha256sum release-evidence.json > release-evidence.json.sha256)
+          ./scripts/verify-release.sh --metadata-only /tmp/release-evidence.json /tmp/release-evidence.json.sha256
+
+          cp /tmp/release-evidence.json /tmp/tampered.json
+          jq '.digest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"' /tmp/tampered.json > /tmp/tampered.new
+          mv /tmp/tampered.new /tmp/tampered.json
+          if ./scripts/verify-release.sh --metadata-only /tmp/tampered.json /tmp/release-evidence.json.sha256 >/dev/null 2>&1; then
+            echo 'consumer verifier accepted tampered evidence' >&2
+            exit 1
+          fi
+
+          grep -Fq 'Verify M1.15 consumer release path' .github/workflows/release.yml
+          grep -Fq './scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256' .github/workflows/release.yml
+          consumer_line=$(grep -n 'Verify M1.15 consumer release path' .github/workflows/release.yml | cut -d: -f1)
+          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
+          test "$consumer_line" -lt "$release_line"
+
+          grep -Fq 'release:' .github/workflows/release-verification.yml
+          grep -Fq 'types: [published]' .github/workflows/release-verification.yml
+          grep -Fq "release-evidence.json.sha256" .github/workflows/release-verification.yml
+          grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
+
       - name: Record release policy
         run: |
           {
-            echo "### M1.8 + M1.12 + M1.13 + M1.14 release integrity qualification"
+            echo "### M1.8 + M1.12 + M1.13 + M1.14 + M1.15 release integrity qualification"
             echo
             echo "- strict OCI-compatible SemVer release tags"
             echo "- annotated/lightweight tag commit must equal successful container workflow commit"
             echo "- OCI revision must equal release commit"
             echo "- exact OCI release digest must have a valid Cosign keyless signature"
-            echo "- signature identity is restricted to this repository's container workflow on a version tag"
+            echo "- signature identity is restricted to this repository's container workflow on the exact version tag"
             echo "- SPDX SBOM and current BuildKit SLSA provenance must validate for amd64 and arm64"
             echo "- deterministic release evidence binds tag, commit and exact OCI digest"
-            echo "- release evidence JSON and SHA-256 checksum are attached only after all gates pass"
+            echo "- consumer verifier validates checksum, evidence policy, OCI revision, exact Cosign identity and attestations"
+            echo "- the same consumer path runs before publication and again on published release assets"
           } >> "$GITHUB_STEP_SUMMARY"
