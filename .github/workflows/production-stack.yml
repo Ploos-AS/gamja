@@ -13,38 +13,51 @@ concurrency:
   group: production-stack-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SOJU_IMAGE: ghcr.io/ploos-as/soju:latest@sha256:ae1eb58d75beea7bfbeff3f004700289f2fcd4c56da671d88216f2cfb2d1d491
+  CADDY_IMAGE: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+
 jobs:
   qualify:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
 
-      - name: Report dependency digests
+      - name: Verify production supply-chain pins
         shell: bash
         run: |
           set -euo pipefail
-          docker buildx imagetools inspect ghcr.io/ploos-as/soju:latest
-          docker buildx imagetools inspect caddy:2-alpine
+          test "$(GAMJA_DOMAIN=irc.example.test docker compose -f examples/production/compose.yaml config --images | grep '^ghcr.io/ploos-as/soju:' | head -1)" = "$SOJU_IMAGE"
+          test "$(GAMJA_DOMAIN=irc.example.test docker compose -f examples/production/compose.yaml config --images | grep '^caddy:' | head -1)" = "$CADDY_IMAGE"
+          docker buildx imagetools inspect "$SOJU_IMAGE" | grep -q 'linux/amd64'
+          docker buildx imagetools inspect "$SOJU_IMAGE" | grep -q 'linux/arm64'
+          docker buildx imagetools inspect "$CADDY_IMAGE" | grep -q 'linux/amd64'
+          docker buildx imagetools inspect "$CADDY_IMAGE" | grep -q 'linux/arm64'
+          sh -n examples/production/backup.sh
+          sh -n examples/production/restore.sh
 
       - name: Build Gamja image
-        run: docker build -t gamja:m13 .
+        run: docker build -t gamja:m14 .
 
       - name: Prepare qualification stack
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/gamja-m13
-          cp examples/production/soju.conf /tmp/gamja-m13/soju.conf
-          cat >/tmp/gamja-m13/Caddyfile <<'EOF'
+          rm -rf /tmp/gamja-m14
+          mkdir -p /tmp/gamja-m14
+          cp examples/production/soju.conf /tmp/gamja-m14/soju.conf
+          cp examples/production/backup.sh /tmp/gamja-m14/backup.sh
+          cp examples/production/restore.sh /tmp/gamja-m14/restore.sh
+          cat >/tmp/gamja-m14/Caddyfile <<'EOF'
           https://localhost {
               tls internal
               reverse_proxy gamja:8080
           }
           EOF
-          cat >/tmp/gamja-m13/compose.yaml <<'EOF'
+          cat >/tmp/gamja-m14/compose.yaml <<EOF
           services:
             soju:
-              image: ghcr.io/ploos-as/soju:latest
+              image: ${SOJU_IMAGE}
               command: ["-config", "/etc/soju/config"]
               volumes:
                 - ./soju.conf:/etc/soju/config:ro
@@ -57,7 +70,7 @@ jobs:
                 retries: 15
                 start_period: 2s
             gamja:
-              image: gamja:m13
+              image: gamja:m14
               depends_on:
                 soju:
                   condition: service_healthy
@@ -69,11 +82,17 @@ jobs:
               read_only: true
               tmpfs: [/tmp]
               networks: [irc]
+              healthcheck:
+                test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+                interval: 2s
+                timeout: 2s
+                retries: 15
+                start_period: 2s
             caddy:
-              image: caddy:2-alpine
+              image: ${CADDY_IMAGE}
               depends_on:
                 gamja:
-                  condition: service_started
+                  condition: service_healthy
               ports:
                 - "18088:80"
                 - "18443:443"
@@ -82,6 +101,12 @@ jobs:
                 - caddy-data:/data
                 - caddy-config:/config
               networks: [irc]
+              healthcheck:
+                test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:2019/config/ >/dev/null || exit 1"]
+                interval: 2s
+                timeout: 2s
+                retries: 15
+                start_period: 2s
           volumes:
             soju-data:
             caddy-data:
@@ -91,23 +116,21 @@ jobs:
           EOF
 
       - name: Start production stack
-        working-directory: /tmp/gamja-m13
-        run: docker compose up -d
+        working-directory: /tmp/gamja-m14
+        run: docker compose up -d --wait
 
-      - name: Verify dependency health and private app services
-        working-directory: /tmp/gamja-m13
+      - name: Verify health ordering and private app services
+        working-directory: /tmp/gamja-m14
         shell: bash
         run: |
           set -euo pipefail
-          soju_id="$(docker compose ps -q soju)"
-          gamja_id="$(docker compose ps -q gamja)"
-          test -n "$soju_id"
-          test -n "$gamja_id"
-          for i in {1..30}; do
-            if [ "$(docker inspect --format '{{.State.Health.Status}}' "$soju_id")" = healthy ]; then break; fi
-            sleep 1
+          for service in soju gamja caddy; do
+            id="$(docker compose ps -q "$service")"
+            test -n "$id"
+            test "$(docker inspect --format '{{.State.Health.Status}}' "$id")" = healthy
           done
-          test "$(docker inspect --format '{{.State.Health.Status}}' "$soju_id")" = healthy
+          gamja_id="$(docker compose ps -q gamja)"
+          soju_id="$(docker compose ps -q soju)"
           docker inspect --format '{{json .HostConfig.PortBindings}}' "$gamja_id" | jq -e 'length == 0'
           docker inspect --format '{{json .HostConfig.PortBindings}}' "$soju_id" | jq -e 'length == 0'
 
@@ -115,42 +138,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for i in {1..30}; do
-            if curl -kfsS --resolve localhost:18443:127.0.0.1 https://localhost:18443/ >/tmp/m13-index.html; then break; fi
-            sleep 1
-          done
-          grep -q '<title>gamja IRC client</title>' /tmp/m13-index.html
-          curl -sSI http://127.0.0.1:18088/ -H 'Host: localhost' >/tmp/m13-http-headers
-          grep -Eq '^HTTP/1\.[01] 30[18] ' /tmp/m13-http-headers
-          grep -qi '^Location: https://localhost/' /tmp/m13-http-headers
+          curl -kfsS --resolve localhost:18443:127.0.0.1 https://localhost:18443/ >/tmp/m14-index.html
+          grep -q '<title>gamja IRC client</title>' /tmp/m14-index.html
+          curl -sSI http://127.0.0.1:18088/ -H 'Host: localhost' >/tmp/m14-http-headers
+          grep -Eq '^HTTP/1\.[01] 30[18] ' /tmp/m14-http-headers
+          grep -qi '^Location: https://localhost/' /tmp/m14-http-headers
 
       - name: Verify WSS through Caddy to Gamja and soju
         shell: bash
         run: |
           set -euo pipefail
-          headers=/tmp/m13-wss-headers
+          headers=/tmp/m14-wss-headers
           curl -k --http1.1 --max-time 2 --silent --show-error \
             --resolve localhost:18443:127.0.0.1 \
-            -D "$headers" -o /tmp/m13-wss-body \
+            -D "$headers" -o /tmp/m14-wss-body \
             -H 'Connection: Upgrade' \
             -H 'Upgrade: websocket' \
             -H 'Sec-WebSocket-Version: 13' \
             -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
             https://localhost:18443/socket || true
-          cat "$headers"
           grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
           grep -qi '^Upgrade: websocket' "$headers"
           grep -qi '^Connection: upgrade' "$headers"
 
-      - name: Verify persistent soju volume
-        working-directory: /tmp/gamja-m13
+      - name: Verify backup and restore
+        working-directory: /tmp/gamja-m14
         shell: bash
         run: |
           set -euo pipefail
-          docker compose config --volumes | grep -qx 'soju-data'
-          docker compose exec -T soju sh -c 'test -d /var/lib/soju'
+          docker compose exec -T soju sh -c "printf '%s\n' m14-backup-marker >/var/lib/soju/m14-marker"
+          sh backup.sh ./backups
+          backup_dir="$(find ./backups -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+          test -n "$backup_dir"
+          test -s "$backup_dir/soju-data.tgz"
+          test -s "$backup_dir/caddy-data.tgz"
+          test -s "$backup_dir/caddy-config.tgz"
+          (cd "$backup_dir" && sha256sum -c SHA256SUMS)
+          docker compose exec -T soju rm -f /var/lib/soju/m14-marker
+          sh restore.sh "$backup_dir"
+          docker compose exec -T soju grep -qx 'm14-backup-marker' /var/lib/soju/m14-marker
+          docker compose up -d --wait
 
       - name: Cleanup
         if: always()
-        working-directory: /tmp/gamja-m13
+        working-directory: /tmp/gamja-m14
         run: docker compose down -v || true
