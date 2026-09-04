@@ -1,0 +1,74 @@
+services:
+  soju:
+    image: ghcr.io/ploos-as/soju:latest
+    restart: unless-stopped
+    command: ["-config", "/etc/soju/config"]
+    volumes:
+      - ./soju.conf:/etc/soju/config:ro
+      - soju-data:/var/lib/soju
+    networks:
+      - irc
+    healthcheck:
+      test: ["CMD-SHELL", "sojudb -config /etc/soju/config help >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  gamja:
+    image: ghcr.io/ploos-as/gamja:latest
+    restart: unless-stopped
+    depends_on:
+      soju:
+        condition: service_healthy
+    environment:
+      SOJU_HOST: soju
+      SOJU_PORT: 8080
+      GAMJA_SERVER_URL: /socket
+      GAMJA_AUTH: ${GAMJA_AUTH:-optional}
+      GAMJA_AUTOJOIN: ${GAMJA_AUTOJOIN:-}
+      GAMJA_NICK: ${GAMJA_NICK:-}
+      GAMJA_AUTOCONNECT: ${GAMJA_AUTOCONNECT:-}
+      GAMJA_PING: ${GAMJA_PING:-}
+      GAMJA_OAUTH2_URL: ${GAMJA_OAUTH2_URL:-}
+      GAMJA_OAUTH2_CLIENT_ID: ${GAMJA_OAUTH2_CLIENT_ID:-}
+      GAMJA_OAUTH2_CLIENT_SECRET: ${GAMJA_OAUTH2_CLIENT_SECRET:-}
+      GAMJA_OAUTH2_SCOPE: ${GAMJA_OAUTH2_SCOPE:-}
+    networks:
+      - irc
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      gamja:
+        condition: service_started
+    environment:
+      GAMJA_DOMAIN: ${GAMJA_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - irc
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  soju-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  irc:
