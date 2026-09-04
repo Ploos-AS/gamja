@@ -35,20 +35,14 @@ jobs:
           ghcr.io/ploos-as/soju:latest@sha256:ae1eb58d75beea7bfbeff3f004700289f2fcd4c56da671d88216f2cfb2d1d491
           caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
           moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8'
-          printf '%s\n' "$refs" | while IFS= read -r ref; do
-            test -n "$ref" || continue
-            echo "checking $ref"
-            docker buildx imagetools inspect "$ref" >/dev/null
-          done
+          printf '%s\n' "$refs" | while IFS= read -r ref; do test -n "$ref" || continue; echo "checking $ref"; docker buildx imagetools inspect "$ref" >/dev/null; done
 
       - name: Report mutable-tag drift
         shell: bash
         run: |
           set -euo pipefail
           check_tag() {
-            name=$1
-            tag=$2
-            pinned=$3
+            name=$1; tag=$2; pinned=$3
             inspect=$(docker buildx imagetools inspect "$tag")
             current=$(printf '%s\n' "$inspect" | awk '/^Digest:/ {print $2; found=1} END {if (!found) exit 1}')
             test -n "$current"
@@ -64,9 +58,7 @@ jobs:
         run: |
           set -eu
           check_commit() {
-            repo=$1
-            sha=$2
-            dir=$(mktemp -d)
+            repo=$1; sha=$2; dir=$(mktemp -d)
             git -C "$dir" init -q
             git -C "$dir" remote add origin "https://github.com/$repo.git"
             git -C "$dir" fetch -q --depth=1 origin "$sha"
@@ -80,6 +72,7 @@ jobs:
           check_commit docker/login-action dbcb813823bdd20940b903addbd779551569679f
           check_commit docker/metadata-action dc802804100637a589fabce1cb79ff13a1411302
           check_commit aquasecurity/trivy-action ed142fd0673e97e23eac54620cfb913e5ce36c25
+          check_commit sigstore/cosign-installer d7543c93d881b35a8faa02e8e3605f69b7a1ce62
 
       - name: Verify dependency pins remain wired into repository
         run: |
@@ -88,6 +81,7 @@ jobs:
           grep -Fq 'nginxinc/nginx-unprivileged:1.30-alpine3.24@sha256:9b87ad3dd9f431c733f19dfb278c7eb3dba9dca381942c79818bb42f1a566a83' Dockerfile
           grep -Fq 'ghcr.io/ploos-as/soju:latest@sha256:ae1eb58d75beea7bfbeff3f004700289f2fcd4c56da671d88216f2cfb2d1d491' examples/production/compose.yaml
           grep -Fq 'caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648' examples/production/compose.yaml
+          grep -Fq 'sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62' .github/workflows/container.yml
 
       - name: Record M1.10 dependency status
         if: always()
@@ -97,11 +91,6 @@ jobs:
             echo
             echo '- Immutable OCI pins are required to remain fetchable.'
             echo '- Mutable tag drift is informational and never changes production pins automatically.'
-            echo '- Pinned GitHub Action commits must remain fetchable by Git.'
-            if [ -f /tmp/dependency-drift.txt ]; then
-              echo
-              echo '```text'
-              cat /tmp/dependency-drift.txt
-              echo '```'
-            fi
+            echo '- Pinned GitHub Action commits, including the M1.11 Cosign installer, must remain fetchable by Git.'
+            if [ -f /tmp/dependency-drift.txt ]; then echo; echo '```text'; cat /tmp/dependency-drift.txt; echo '```'; fi
           } >> "$GITHUB_STEP_SUMMARY"
