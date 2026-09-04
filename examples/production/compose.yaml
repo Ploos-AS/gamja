@@ -1,6 +1,6 @@
 services:
   soju:
-    image: ghcr.io/ploos-as/soju:latest
+    image: ghcr.io/ploos-as/soju:latest@sha256:ae1eb58d75beea7bfbeff3f004700289f2fcd4c56da671d88216f2cfb2d1d491
     restart: unless-stopped
     command: ["-config", "/etc/soju/config"]
     volumes:
@@ -41,15 +41,21 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     security_opt:
       - no-new-privileges:true
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: unless-stopped
     depends_on:
       gamja:
-        condition: service_started
+        condition: service_healthy
     environment:
       GAMJA_DOMAIN: ${GAMJA_DOMAIN}
     ports:
@@ -62,6 +68,12 @@ services:
       - caddy-config:/config
     networks:
       - irc
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:2019/config/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     security_opt:
       - no-new-privileges:true
 
