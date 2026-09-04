@@ -24,6 +24,7 @@ Targets:
 - explicit OCI license metadata
 - SBOM and BuildKit provenance on published images
 - runtime Gamja configuration through environment variables
+- qualified Caddy and nginx reverse-proxy examples for HTTPS/WSS deployment
 
 The current build is pinned to upstream commit:
 
@@ -35,6 +36,12 @@ The current build is pinned to upstream commit:
 
 ```text
 Browser -> Gamja/nginx :8080 -> /socket -> soju WebSocket -> IRC networks
+```
+
+For public deployments, put a TLS reverse proxy in front:
+
+```text
+Browser -> HTTPS/WSS -> Caddy or nginx -> Gamja :8080 -> /socket -> soju
 ```
 
 The container generates `/config.json` at startup under `/tmp` and serves it through nginx. No image rebuild is required for normal Gamja server configuration.
@@ -103,7 +110,22 @@ docker compose exec soju sojudb -config /etc/soju/config create-user <username> 
 docker compose restart soju
 ```
 
-Put the public Gamja endpoint behind HTTPS before exposing it to untrusted networks.
+## HTTPS/WSS reverse proxy
+
+Qualified reference configs are in `examples/reverse-proxy/`:
+
+- `Caddyfile`: automatic HTTPS and automatic WebSocket proxying
+- `nginx.conf`: explicit TLS termination, forwarded headers, and WebSocket Upgrade/Connection handling
+
+For a public deployment, expose the reverse proxy on ports 80/443 and keep Gamja port 8080 plus soju on a private container network. Caddy automatically handles WebSocket upgrades when using `reverse_proxy`. The nginx example follows nginx's documented WebSocket pattern with a `map` for the upstream `Connection` value and explicitly forwards `Upgrade`.
+
+M1.2 CI verifies both paths with real protocol upgrades. The nginx qualification uses HTTPS and validates WSS end-to-end through:
+
+```text
+client -> TLS nginx -> Gamja -> soju
+```
+
+See `examples/reverse-proxy/README.md` for deployment details.
 
 ## Podman Quadlet
 
@@ -136,7 +158,7 @@ docker build --build-arg GAMJA_COMMIT=<commit> -t gamja:test .
 
 The runtime uses unprivileged nginx on port 8080. Supplied deployments use a read-only root filesystem, `/tmp` for transient runtime state, and `no-new-privileges`.
 
-Gamja itself is a browser client. Serve the site and WebSocket endpoint over HTTPS/WSS outside trusted local testing.
+Gamja itself is a browser client. Serve the site and WebSocket endpoint over HTTPS/WSS outside trusted local testing. Do not publish port 8080 directly when a public reverse proxy is in use.
 
 ## CI qualification
 
@@ -152,6 +174,8 @@ CI validates:
 - M1.1 OAuth2 configuration generation
 - rejection of invalid runtime configuration
 - a real WebSocket upgrade through `Gamja -> nginx /socket -> soju`
+- M1.2 Caddy reverse-proxy WebSocket upgrade
+- M1.2 nginx TLS termination and WSS upgrade
 - published linux/amd64 and linux/arm64 OCI manifests
 - OCI license metadata
 - pinned GitHub Actions/QEMU/BuildKit tooling
