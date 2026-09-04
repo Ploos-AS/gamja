@@ -1,0 +1,11 @@
+SPDX-License-Identifier: AGPL-3.0-only
+
+This repository is distributed under the GNU Affero General Public License,
+version 3 only (AGPL-3.0-only).
+
+The complete license text is available from the Free Software Foundation:
+https://www.gnu.org/licenses/agpl-3.0.txt
+
+Gamja itself is an upstream project distributed under AGPLv3. The container
+build in this repository fetches a pinned upstream Gamja revision and packages
+its generated web assets without changing the upstream license.
