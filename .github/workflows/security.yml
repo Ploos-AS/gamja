@@ -1,0 +1,61 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Build runtime image for security qualification
+        run: docker build --pull=false -t gamja:security .
+
+      - name: Scan runtime image for fixable HIGH/CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: image
+          image-ref: gamja:security
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Scan repository for HIGH/CRITICAL secrets and misconfigurations
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: fs
+          scan-ref: .
+          scanners: secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+
+      - name: Record M1.7 policy
+        if: always()
+        run: |
+          {
+            echo "### M1.7 security qualification"
+            echo
+            echo "- Trivy action: v0.36.0 pinned at \`ed142fd0673e97e23eac54620cfb913e5ce36c25\`"
+            echo "- Trivy engine: \`v0.74.0\`"
+            echo "- Runtime CVE gate: fixable \`HIGH,CRITICAL\` OS/library vulnerabilities"
+            echo "- Repository gate: \`HIGH,CRITICAL\` secret and misconfiguration findings"
+            echo "- Runner: \`ubuntu-24.04\`"
+          } >> "$GITHUB_STEP_SUMMARY"
