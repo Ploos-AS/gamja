@@ -25,6 +25,7 @@ Targets:
 - SBOM and BuildKit provenance on published images
 - runtime Gamja configuration through environment variables
 - qualified Caddy and nginx reverse-proxy examples for HTTPS/WSS deployment
+- qualified production Compose stack with Caddy + Gamja + soju
 
 The current build is pinned to upstream commit:
 
@@ -38,7 +39,7 @@ The current build is pinned to upstream commit:
 Browser -> Gamja/nginx :8080 -> /socket -> soju WebSocket -> IRC networks
 ```
 
-For public deployments, put a TLS reverse proxy in front:
+For public deployments:
 
 ```text
 Browser -> HTTPS/WSS -> Caddy or nginx -> Gamja :8080 -> /socket -> soju
@@ -61,6 +62,28 @@ Example override:
 ```sh
 GAMJA_NICK='guest*' GAMJA_AUTOJOIN='#gamja,#soju' GAMJA_AUTOCONNECT=true docker compose up -d
 ```
+
+## Production stack
+
+`examples/production/` contains the M1.3 reference deployment with soju, Gamja and Caddy. Only Caddy publishes host ports; Gamja and soju stay private on the Compose network. Soju and Caddy state use named persistent volumes.
+
+```sh
+cd examples/production
+cp .env.example .env
+$EDITOR .env
+docker compose up -d
+```
+
+Set `GAMJA_DOMAIN` to a public DNS hostname whose A/AAAA records point at the host. TCP 80/443 must be reachable; UDP 443 is also published for HTTP/3. Caddy obtains and renews public HTTPS certificates automatically for a valid public hostname.
+
+Create the first soju administrator after the stack is healthy:
+
+```sh
+docker compose exec soju sojudb -config /etc/soju/config create-user <username> -admin
+docker compose restart soju
+```
+
+See `examples/production/README.md` for persistence, security and validation details.
 
 ## Runtime configuration
 
@@ -96,36 +119,23 @@ The generated nginx configuration and Gamja configuration both live under `/tmp`
 
 ## Complete Gamja + soju example
 
-A self-contained reference deployment is available in `examples/soju/`:
+A simpler non-TLS reference deployment is available in `examples/soju/`:
 
 ```sh
 cd examples/soju
 docker compose up -d
 ```
 
-It starts soju and Gamja on a private shared container network and exposes only Gamja on host port 8080. Create the first soju user with:
-
-```sh
-docker compose exec soju sojudb -config /etc/soju/config create-user <username> -admin
-docker compose restart soju
-```
+It starts soju and Gamja on a private shared container network and exposes only Gamja on host port 8080. Use `examples/production/` for Internet-facing deployment.
 
 ## HTTPS/WSS reverse proxy
 
-Qualified reference configs are in `examples/reverse-proxy/`:
+Qualified standalone reference configs are in `examples/reverse-proxy/`:
 
 - `Caddyfile`: automatic HTTPS and automatic WebSocket proxying
 - `nginx.conf`: explicit TLS termination, forwarded headers, and WebSocket Upgrade/Connection handling
 
-For a public deployment, expose the reverse proxy on ports 80/443 and keep Gamja port 8080 plus soju on a private container network. Caddy automatically handles WebSocket upgrades when using `reverse_proxy`. The nginx example follows nginx's documented WebSocket pattern with a `map` for the upstream `Connection` value and explicitly forwards `Upgrade`.
-
-M1.2 CI verifies both paths with real protocol upgrades. The nginx qualification uses HTTPS and validates WSS end-to-end through:
-
-```text
-client -> TLS nginx -> Gamja -> soju
-```
-
-See `examples/reverse-proxy/README.md` for deployment details.
+M1.2 CI verifies both paths with real protocol upgrades, including HTTPS/WSS through nginx.
 
 ## Podman Quadlet
 
@@ -156,9 +166,9 @@ docker build --build-arg GAMJA_COMMIT=<commit> -t gamja:test .
 
 ## Security/runtime notes
 
-The runtime uses unprivileged nginx on port 8080. Supplied deployments use a read-only root filesystem, `/tmp` for transient runtime state, and `no-new-privileges`.
+The runtime uses unprivileged nginx on port 8080. Supplied deployments use a read-only root filesystem, `/tmp` for transient runtime state, and `no-new-privileges` where applicable.
 
-Gamja itself is a browser client. Serve the site and WebSocket endpoint over HTTPS/WSS outside trusted local testing. Do not publish port 8080 directly when a public reverse proxy is in use.
+Gamja itself is a browser client. Serve the site and WebSocket endpoint over HTTPS/WSS outside trusted local testing. In the production Compose example only Caddy is Internet-facing; application ports remain private to the Compose network.
 
 ## CI qualification
 
@@ -176,6 +186,11 @@ CI validates:
 - a real WebSocket upgrade through `Gamja -> nginx /socket -> soju`
 - M1.2 Caddy reverse-proxy WebSocket upgrade
 - M1.2 nginx TLS termination and WSS upgrade
+- M1.3 production Compose dependency health
+- M1.3 private Gamja/soju service ports
+- M1.3 HTTP-to-HTTPS redirect and HTTPS application delivery
+- M1.3 WSS through `Caddy -> Gamja -> soju`
+- M1.3 persistent soju volume wiring
 - published linux/amd64 and linux/arm64 OCI manifests
 - OCI license metadata
 - pinned GitHub Actions/QEMU/BuildKit tooling
