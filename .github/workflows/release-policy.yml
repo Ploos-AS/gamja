@@ -1,0 +1,79 @@
+name: release-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Qualify strict release tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          validator=./scripts/validate-release-tag.sh
+          chmod +x "$validator"
+
+          valid=(
+            v0.2.0
+            v1.0.0
+            v10.20.30
+            v1.2.3-rc.1
+            v1.2.3-alpha.beta
+          )
+          invalid=(
+            1.2.3
+            v1.2
+            v1.2.3+build.1
+            v01.2.3
+            v1.02.3
+            v1.2.03
+            v1.2.3-01
+            v1.2.3-
+            v1.2.3-rc..1
+          )
+
+          for tag in "${valid[@]}"; do
+            version="$($validator "$tag")"
+            test "$version" = "${tag#v}"
+          done
+
+          for tag in "${invalid[@]}"; do
+            if "$validator" "$tag" >/dev/null 2>&1; then
+              echo "validator incorrectly accepted $tag" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify release integrity wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'scripts/validate-release-tag.sh' .github/workflows/release.yml
+          grep -Fq 'tag_commit' .github/workflows/release.yml
+          grep -Fq 'workflow_run.head_sha' .github/workflows/release.yml
+          grep -Fq 'org.opencontainers.image.revision' .github/workflows/release.yml
+          grep -Fq 'org.opencontainers.image.revision' .github/workflows/container.yml
+
+      - name: Record M1.8 policy
+        run: |
+          {
+            echo "### M1.8 release integrity qualification"
+            echo
+            echo "- strict OCI-compatible SemVer release tags"
+            echo "- build metadata (\`+...\`) rejected because it cannot map losslessly to an OCI tag"
+            echo "- annotated/lightweight tag peeled commit must equal the successful container workflow commit"
+            echo "- published OCI revision annotation must equal the release commit"
+          } >> "$GITHUB_STEP_SUMMARY"
