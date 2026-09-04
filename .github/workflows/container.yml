@@ -47,37 +47,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run -d --name gamja-smoke \
-            -p 18080:8080 \
-            --read-only \
-            --tmpfs /tmp \
-            --security-opt no-new-privileges:true \
-            gamja:smoke
+          docker run -d --name gamja-smoke -p 18080:8080 --read-only --tmpfs /tmp --security-opt no-new-privileges:true gamja:smoke
           trap 'docker logs gamja-smoke || true; docker rm -f gamja-smoke || true' EXIT
-
-          for i in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:18080/ >/tmp/gamja-index.html; then
-              break
-            fi
-            sleep 1
-          done
-
+          for i in {1..30}; do if curl --fail --silent --show-error http://127.0.0.1:18080/ >/tmp/gamja-index.html; then break; fi; sleep 1; done
           curl --fail --silent --show-error http://127.0.0.1:18080/config.json >/tmp/gamja-config.json
           grep -q '<title>gamja IRC client</title>' /tmp/gamja-index.html
           grep -q '"url": "/socket"' /tmp/gamja-config.json
-
-          for i in {1..30}; do
-            health="$(docker inspect --format '{{.State.Health.Status}}' gamja-smoke)"
-            if [ "$health" = healthy ]; then
-              break
-            fi
-            if [ "$health" = unhealthy ]; then
-              docker logs gamja-smoke
-              exit 1
-            fi
-            sleep 1
-          done
-
+          for i in {1..30}; do health="$(docker inspect --format '{{.State.Health.Status}}' gamja-smoke)"; [ "$health" = healthy ] && break; [ "$health" = unhealthy ] && exit 1; sleep 1; done
           test "$(docker inspect --format '{{.State.Health.Status}}' gamja-smoke)" = healthy
           test "$(docker inspect --format '{{.Config.User}}' gamja-smoke)" != ""
           test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' gamja-smoke)" = true
@@ -87,47 +63,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cat >/tmp/soju-m02.conf <<'EOF'
           db sqlite3 /var/lib/soju/main.db
           listen http+insecure://0.0.0.0:8080
           EOF
-
           docker network create gamja-m02
-          docker run -d --name soju-m02 \
-            --network gamja-m02 \
-            --network-alias soju \
-            -v /tmp/soju-m02.conf:/etc/soju/m02.conf:ro \
-            ghcr.io/ploos-as/soju:latest \
-            -config /etc/soju/m02.conf
-
-          docker run -d --name gamja-m02 \
-            --network gamja-m02 \
-            -p 18081:8080 \
-            --read-only \
-            --tmpfs /tmp \
-            --security-opt no-new-privileges:true \
-            gamja:smoke
-
+          docker run -d --name soju-m02 --network gamja-m02 --network-alias soju -v /tmp/soju-m02.conf:/etc/soju/m02.conf:ro ghcr.io/ploos-as/soju:latest -config /etc/soju/m02.conf
+          docker run -d --name gamja-m02 --network gamja-m02 -p 18081:8080 --read-only --tmpfs /tmp --security-opt no-new-privileges:true gamja:smoke
           trap 'docker logs gamja-m02 || true; docker logs soju-m02 || true; docker rm -f gamja-m02 soju-m02 || true; docker network rm gamja-m02 || true' EXIT
-
-          for i in {1..30}; do
-            if curl --fail --silent --show-error http://127.0.0.1:18081/ >/dev/null; then
-              break
-            fi
-            sleep 1
-          done
-
+          for i in {1..30}; do if curl --fail --silent --show-error http://127.0.0.1:18081/ >/dev/null; then break; fi; sleep 1; done
           headers=/tmp/gamja-m02-ws-headers
-          curl --http1.1 --max-time 2 --silent --show-error \
-            -D "$headers" -o /tmp/gamja-m02-ws-body \
-            -H 'Connection: Upgrade' \
-            -H 'Upgrade: websocket' \
-            -H 'Sec-WebSocket-Version: 13' \
-            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-            http://127.0.0.1:18081/socket || true
-
-          cat "$headers"
+          curl --http1.1 --max-time 2 --silent --show-error -D "$headers" -o /tmp/gamja-m02-ws-body -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://127.0.0.1:18081/socket || true
           grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
           grep -qi '^Upgrade: websocket' "$headers"
           grep -qi '^Connection: upgrade' "$headers"
@@ -200,6 +146,32 @@ jobs:
           sbom: ${{ github.event_name != 'pull_request' && 'generator=docker.io/docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9' || 'false' }}
           provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
 
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      - name: Sign published image digest with GitHub OIDC
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "$IMAGE_DIGEST"
+          cosign sign --yes "ghcr.io/ploos-as/gamja@$IMAGE_DIGEST"
+
+      - name: Verify keyless image signature
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/(heads/main|tags/v.*)$' \
+            "ghcr.io/ploos-as/gamja@$IMAGE_DIGEST" >/tmp/cosign-verification.json
+          jq -e 'length > 0' /tmp/cosign-verification.json >/dev/null
+          echo 'M1.11 keyless Cosign signature verified against GitHub Actions OIDC identity.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify published multi-arch manifest
         if: github.event_name != 'pull_request'
         shell: bash
@@ -207,36 +179,21 @@ jobs:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            image="ghcr.io/ploos-as/gamja:${GITHUB_REF_NAME#v}"
-          else
-            image=ghcr.io/ploos-as/gamja:latest
-          fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then image="ghcr.io/ploos-as/gamja:${GITHUB_REF_NAME#v}"; else image=ghcr.io/ploos-as/gamja:latest; fi
           docker buildx imagetools inspect --raw "$image" > /tmp/manifest.json
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")' /tmp/manifest.json
           jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' /tmp/manifest.json
           jq -e '.annotations["org.opencontainers.image.licenses"] == "AGPL-3.0-only"' /tmp/manifest.json
           jq -e '.annotations["org.opencontainers.image.source"] == "https://github.com/Ploos-AS/gamja"' /tmp/manifest.json
           jq -e --arg revision "$GITHUB_SHA" '.annotations["org.opencontainers.image.revision"] == $revision' /tmp/manifest.json
-          digest="$IMAGE_DIGEST"
-          test -n "$digest"
-          echo "Published digest: $digest"
+          test -n "$IMAGE_DIGEST"
+          echo "Published digest: $IMAGE_DIGEST"
           echo "### Published image" >> "$GITHUB_STEP_SUMMARY"
           echo "\`$image\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: \`$IMAGE_DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Revision: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Platforms: \`linux/amd64\`, \`linux/arm64\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Actions runtime: Node 24-native, immutable SHA pins" >> "$GITHUB_STEP_SUMMARY"
-          echo "Runner: \`ubuntu-24.04\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "OCI license: \`AGPL-3.0-only\` (label + index/manifest annotation)" >> "$GITHUB_STEP_SUMMARY"
-          echo "QEMU/binfmt: \`qemu-v10.2.3@sha256:400a4873...\` (arm64 only)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Buildx: \`v0.36.1\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "BuildKit: \`v0.32.2@sha256:28a898719c18a33f...\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Dockerfile frontend: \`docker/dockerfile:1.7@sha256:a57df69d...\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "SBOM generator: \`docker/buildkit-syft-scanner@sha256:ae4f3b55...\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Trivy: \`v0.74.0\`, action v0.36.0 pinned at \`ed142fd...\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Security gate: fixable HIGH/CRITICAL runtime CVEs + HIGH/CRITICAL repo secret/misconfiguration findings" >> "$GITHUB_STEP_SUMMARY"
-          echo "Release integrity: OCI revision annotation bound to the exact workflow commit" >> "$GITHUB_STEP_SUMMARY"
+          echo "OCI license: \`AGPL-3.0-only\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "SBOM: BuildKit Syft scanner" >> "$GITHUB_STEP_SUMMARY"
           echo "Provenance: mode=max" >> "$GITHUB_STEP_SUMMARY"
+          echo "Signature: Cosign keyless / GitHub Actions OIDC" >> "$GITHUB_STEP_SUMMARY"
