@@ -22,6 +22,7 @@ Targets and production properties:
 - M1.11 keyless Cosign signatures bound to the GitHub Actions OIDC workflow identity
 - M1.13 digest-bound SBOM/provenance verification before release creation
 - M1.14 deterministic release evidence JSON plus SHA-256 checksum attached to releases
+- M1.15 one-command consumer release verification, enforced before and after publication
 - runtime Gamja configuration through environment variables
 - qualified HTTPS/WSS reverse proxies, production Compose and Podman Quadlet deployments
 
@@ -127,17 +128,25 @@ M1.11 signs every published OCI digest with Cosign keyless signing using the sho
 
 M1.13 validates the published SPDX SBOM and BuildKit SLSA provenance for both linux/amd64 and linux/arm64 against the immutable OCI digest. The same verifier is enforced by the release workflow before GitHub Release creation. See `ATTESTATIONS.md`.
 
-M1.14 emits deterministic `release-evidence.json` only after the release signature and attestations have passed, checksums it, and attaches both evidence files to the GitHub Release. See `RELEASE-EVIDENCE.md`.
+M1.14 emits deterministic `release-evidence.json` only after the release signature and attestations have passed, checksums it, and attaches both evidence files to the GitHub Release.
+
+M1.15 adds `scripts/verify-release.sh`, which validates the evidence checksum and semantics, OCI revision, exact tag-scoped Cosign identity, and both platform attestations. The release workflow must pass this consumer verifier before publication, and `release-verification` repeats it independently against the published release assets. See `RELEASE-EVIDENCE.md`.
 
 ## CI qualification
 
-CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless signatures, digest-bound SBOM/provenance attestation verification, and deterministic release-evidence generation.
+CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless signatures, digest-bound SBOM/provenance attestation verification, deterministic release-evidence generation, tamper rejection, and the consumer release-verification path.
 
 ## Releases
 
 Release tags use an OCI-compatible SemVer subset such as `v0.2.0` or `v0.2.0-rc.1`. Build metadata (`+...`) is rejected because it cannot map losslessly to an OCI tag. Stable tags publish full version plus major/minor aliases; `latest` is produced from qualified `main`.
 
-Each new release carries `release-evidence.json` and `release-evidence.json.sha256`, binding its tag and commit to the exact verified OCI digest. Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md`, attestation verification in `ATTESTATIONS.md`, and evidence semantics in `RELEASE-EVIDENCE.md`.
+Each new release carries `release-evidence.json` and `release-evidence.json.sha256`, binding its tag and commit to the exact verified OCI digest. After downloading those two files, the canonical full verification command is:
+
+```sh
+./scripts/verify-release.sh release-evidence.json release-evidence.json.sha256
+```
+
+Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md`, attestation verification in `ATTESTATIONS.md`, and evidence plus consumer verification in `RELEASE-EVIDENCE.md`.
 
 ## License and upstream
 
