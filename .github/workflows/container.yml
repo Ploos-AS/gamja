@@ -73,6 +73,55 @@ jobs:
           test "$(docker inspect --format '{{.Config.User}}' gamja-smoke)" != ""
           test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' gamja-smoke)" = true
 
+      - name: Soju WebSocket integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat >/tmp/soju-m02.conf <<'EOF'
+          db sqlite3 /var/lib/soju/main.db
+          listen http+insecure://0.0.0.0:8080
+          EOF
+
+          docker network create gamja-m02
+          docker run -d --name soju-m02 \
+            --network gamja-m02 \
+            --network-alias soju \
+            -v /tmp/soju-m02.conf:/etc/soju/m02.conf:ro \
+            ghcr.io/ploos-as/soju:latest \
+            -config /etc/soju/m02.conf
+
+          docker run -d --name gamja-m02 \
+            --network gamja-m02 \
+            -p 18081:8080 \
+            --read-only \
+            --tmpfs /tmp \
+            --security-opt no-new-privileges:true \
+            gamja:smoke
+
+          trap 'docker logs gamja-m02 || true; docker logs soju-m02 || true; docker rm -f gamja-m02 soju-m02 || true; docker network rm gamja-m02 || true' EXIT
+
+          for i in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:18081/ >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          headers=/tmp/gamja-m02-ws-headers
+          curl --http1.1 --max-time 2 --silent --show-error \
+            -D "$headers" -o /tmp/gamja-m02-ws-body \
+            -H 'Connection: Upgrade' \
+            -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            http://127.0.0.1:18081/socket || true
+
+          cat "$headers"
+          grep -Eq '^HTTP/1\.[01] 101 ' "$headers"
+          grep -qi '^Upgrade: websocket' "$headers"
+          grep -qi '^Connection: upgrade' "$headers"
+
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
