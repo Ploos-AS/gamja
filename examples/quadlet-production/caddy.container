@@ -1,0 +1,29 @@
+[Unit]
+Description=Caddy edge proxy for production Gamja
+After=gamja.service
+Requires=gamja.service
+
+[Container]
+Image=caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+ContainerName=gamja-caddy
+Network=irc.network
+EnvironmentFile=/etc/gamja/gamja.env
+PublishPort=80:80
+PublishPort=443:443
+PublishPort=443:443/udp
+Volume=/etc/gamja/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+Volume=caddy-data.volume:/data
+Volume=caddy-config.volume:/config
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
+NoNewPrivileges=true
+
+[Service]
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do podman healthcheck run gamja >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
