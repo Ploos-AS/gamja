@@ -118,10 +118,36 @@ jobs:
           grep -Fq "release-evidence.json.sha256" .github/workflows/release-verification.yml
           grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
 
+      - name: Qualify M1.16 digest-bound runtime gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ./scripts/qualify-release-runtime.sh
+          chmod +x ./scripts/qualify-release-runtime.sh
+          if ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja:latest >/dev/null 2>&1; then
+            echo 'release runtime qualifier accepted a mutable tag' >&2
+            exit 1
+          fi
+          grep -Fq 'Qualify M1.16 exact release runtime' .github/workflows/release.yml
+          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"' .github/workflows/release.yml
+          runtime_line=$(grep -n 'Qualify M1.16 exact release runtime' .github/workflows/release.yml | cut -d: -f1)
+          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
+          test "$runtime_line" -lt "$release_line"
+          grep -Fq 'workflow_run:' .github/workflows/release-runtime.yml
+          grep -Fq 'workflows: [container]' .github/workflows/release-runtime.yml
+          grep -Fq 'EXPECTED_REVISION' .github/workflows/release-runtime.yml
+          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST"' .github/workflows/release-runtime.yml
+          grep -Fq -- '--read-only' scripts/qualify-release-runtime.sh
+          grep -Fq -- '--security-opt no-new-privileges:true' scripts/qualify-release-runtime.sh
+          grep -Fq "101" scripts/qualify-release-runtime.sh
+          grep -Fq '101 ' scripts/qualify-release-runtime.sh || grep -Fq ' 101' scripts/qualify-release-runtime.sh
+          grep -Fq 'Sec-WebSocket-Version: 13' scripts/qualify-release-runtime.sh
+          grep -Fq "^HTTP/1\\.[01] 101 " scripts/qualify-release-runtime.sh
+
       - name: Record release policy
         run: |
           {
-            echo "### M1.8 + M1.12 + M1.13 + M1.14 + M1.15 release integrity qualification"
+            echo "### M1.8 + M1.12 + M1.13 + M1.14 + M1.15 + M1.16 release integrity qualification"
             echo
             echo "- strict OCI-compatible SemVer release tags"
             echo "- annotated/lightweight tag commit must equal successful container workflow commit"
@@ -132,4 +158,5 @@ jobs:
             echo "- deterministic release evidence binds tag, commit and exact OCI digest"
             echo "- consumer verifier validates checksum, evidence policy, OCI revision, exact Cosign identity and attestations"
             echo "- the same consumer path runs before publication and again on published release assets"
+            echo "- exact digest must execute non-root/read-only, become healthy, serve generated config and complete a real WebSocket upgrade to pinned soju"
           } >> "$GITHUB_STEP_SUMMARY"
