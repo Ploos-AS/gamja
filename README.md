@@ -21,10 +21,11 @@ Targets:
 - pinned multi-platform base-image digests
 - pinned GitHub Actions by commit SHA
 - pinned QEMU/binfmt and BuildKit
-- explicit OCI license metadata
+- explicit OCI license and revision metadata
 - SBOM and BuildKit provenance on published images
 - release-blocking Trivy security qualification
 - daily vulnerability, secret and misconfiguration re-scan
+- strict tag -> workflow commit -> OCI revision release-integrity gate
 - runtime Gamja configuration through environment variables
 - qualified Caddy and nginx reverse-proxy examples for HTTPS/WSS deployment
 - qualified production Compose stack with Caddy + Gamja + soju
@@ -200,6 +201,9 @@ CI validates:
 - M1.7 no fixable HIGH/CRITICAL vulnerabilities in the final runtime image
 - M1.7 no HIGH/CRITICAL repository secret or misconfiguration findings
 - M1.7 daily continuous security re-scan
+- M1.8 strict OCI-compatible release-tag validation
+- M1.8 release tag commit equals the successful container workflow commit
+- M1.8 OCI revision annotation equals the exact built/released commit
 - published linux/amd64 and linux/arm64 OCI manifests
 - OCI license metadata
 - pinned GitHub Actions/QEMU/BuildKit tooling
@@ -208,7 +212,9 @@ CI validates:
 
 ## Releases
 
-Releases use semantic tags such as `v0.1.0`. A tag publishes the full version plus major/minor aliases. `latest` is produced from the qualified default branch.
+Release tags use an OCI-compatible SemVer subset such as `v0.2.0` or `v0.2.0-rc.1`. Build metadata (`+...`) is rejected because it cannot map losslessly to an OCI tag. Stable tags publish the full version plus major/minor aliases. `latest` is produced from the qualified default branch.
+
+M1.8 binds each published OCI index to its exact Git commit with `org.opencontainers.image.revision`; GitHub Release creation additionally verifies that the Git tag, successful container workflow, and OCI revision all identify the same commit.
 
 The complete release gate and procedure are documented in `RELEASE.md`. Published release tags are treated as immutable; fixes are released under a new version.
 
