@@ -61,7 +61,8 @@ jobs:
           grep -Fq 'scripts/verify-attestations.sh' .github/workflows/release.yml
           grep -Fq 'Verify release SBOM and provenance attestations' .github/workflows/release.yml
           grep -Fq 'SPDXRef-DOCUMENT' scripts/verify-attestations.sh
-          grep -Fq 'https://mobyproject.org/buildkit@v1' scripts/verify-attestations.sh
+          grep -Fq 'https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md' scripts/verify-attestations.sh
+          grep -Fq '.buildDefinition.buildType' scripts/verify-attestations.sh
           grep -Fq 'linux/amd64 linux/arm64' scripts/verify-attestations.sh
           attest_line=$(grep -n 'Verify release SBOM and provenance attestations' .github/workflows/release.yml | cut -d: -f1)
           release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
@@ -77,6 +78,6 @@ jobs:
             echo "- OCI revision must equal release commit"
             echo "- exact OCI release digest must have a valid Cosign keyless signature"
             echo "- signature identity is restricted to this repository's container workflow on a version tag"
-            echo "- SPDX SBOM and BuildKit SLSA provenance must validate for amd64 and arm64"
+            echo "- SPDX SBOM and current BuildKit SLSA provenance must validate for amd64 and arm64"
             echo "- GitHub Release creation occurs only after signature and attestation verification"
           } >> "$GITHUB_STEP_SUMMARY"
