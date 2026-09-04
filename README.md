@@ -19,6 +19,10 @@ Targets:
 - no Node.js in the runtime image
 - reproducible upstream source pin
 - pinned multi-platform base-image digests
+- pinned GitHub Actions by commit SHA
+- pinned QEMU/binfmt release with only arm64 enabled
+- pinned BuildKit release
+- explicit OCI license metadata
 - SBOM and BuildKit provenance on published images
 
 The current build is pinned to upstream commit:
@@ -27,7 +31,7 @@ The current build is pinned to upstream commit:
 0f273b96994fb32b3a1b868d4b59229285f3455c
 ```
 
-The current release base images are pinned by multi-platform index digest in the Dockerfile.
+The current release base images are pinned by multi-platform index digest in the Dockerfile. CI additionally pins `tonistiigi/binfmt` to `qemu-v10.2.3` and BuildKit to `v0.32.2` rather than using their floating defaults.
 
 ## Architecture
 
@@ -190,9 +194,12 @@ CI validates:
 - non-root execution
 - read-only root filesystem
 - health check
+- OCI license label equals `AGPL-3.0-only`
 - a real WebSocket upgrade through `Gamja -> nginx /socket -> soju`
 - published linux/amd64 and linux/arm64 OCI manifests
 - pinned GitHub Actions by commit SHA
+- pinned QEMU/binfmt release with only arm64 installed
+- pinned BuildKit release
 - SBOM generation for published images
 - BuildKit provenance with `mode=max`
 
@@ -208,4 +215,4 @@ The complete release gate and procedure are documented in `RELEASE.md`. Publishe
 - soju: https://soju.im/
 - Repository license: AGPL-3.0-only
 
-Gamja is distributed under AGPLv3. This repository builds a pinned upstream revision and retains that licensing model.
+Gamja is distributed under AGPLv3. This repository builds a pinned upstream revision and retains that licensing model. Published OCI metadata explicitly records `org.opencontainers.image.licenses=AGPL-3.0-only`.
