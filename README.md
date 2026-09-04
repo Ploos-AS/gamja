@@ -16,10 +16,11 @@ Targets and production properties:
 - non-root runtime with explicit UID 101
 - read-only-root-filesystem friendly; no Node.js in runtime
 - reproducible pinned upstream source and immutable dependency pins
-- SBOM plus BuildKit provenance (`mode=max`)
+- SPDX SBOM plus BuildKit SLSA provenance (`mode=max`) for both platforms
 - release-blocking Trivy security qualification and daily re-scan
 - strict tag -> workflow commit -> OCI revision release-integrity gate
 - M1.11 keyless Cosign signatures bound to the GitHub Actions OIDC workflow identity
+- M1.13 digest-bound SBOM/provenance verification before release creation
 - runtime Gamja configuration through environment variables
 - qualified HTTPS/WSS reverse proxies, production Compose and Podman Quadlet deployments
 
@@ -121,17 +122,19 @@ The runtime uses unprivileged nginx on port 8080. Supplied deployments use a rea
 
 M1.7 scans the final runtime image for fixable HIGH/CRITICAL vulnerabilities and the repository for HIGH/CRITICAL secrets/misconfigurations. M1.8 binds release tags to the exact workflow commit and OCI revision. M1.9 qualifies the upstream source pin. M1.10 qualifies external OCI and GitHub Action dependencies.
 
-M1.11 signs every published OCI digest with Cosign keyless signing using the short-lived GitHub Actions OIDC identity, then immediately verifies the signature against the expected `Ploos-AS/gamja` `container.yml` workflow identity and GitHub Actions OIDC issuer. No long-lived signing key is stored. See `SIGNING.md` for the verification command and trust model.
+M1.11 signs every published OCI digest with Cosign keyless signing using the short-lived GitHub Actions OIDC identity, then immediately verifies the signature against the expected `Ploos-AS/gamja` `container.yml` workflow identity and GitHub Actions OIDC issuer. No long-lived signing key is stored. See `SIGNING.md`.
+
+M1.13 validates the published SPDX SBOM and BuildKit SLSA provenance for both linux/amd64 and linux/arm64 against the immutable OCI digest. The same verifier is enforced by the release workflow before GitHub Release creation. See `ATTESTATIONS.md`.
 
 ## CI qualification
 
-CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, SBOM, provenance and M1.11 keyless signature creation plus verification.
+CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless signatures, and digest-bound SBOM/provenance attestation verification.
 
 ## Releases
 
 Release tags use an OCI-compatible SemVer subset such as `v0.2.0` or `v0.2.0-rc.1`. Build metadata (`+...`) is rejected because it cannot map losslessly to an OCI tag. Stable tags publish full version plus major/minor aliases; `latest` is produced from qualified `main`.
 
-Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md`.
+Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md` and attestation verification in `ATTESTATIONS.md`.
 
 ## License and upstream
 
