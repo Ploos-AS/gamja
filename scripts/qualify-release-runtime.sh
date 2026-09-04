@@ -47,6 +47,9 @@ cat >"$soju_config" <<'EOF'
 db sqlite3 /var/lib/soju/main.db
 listen http+insecure://0.0.0.0:8080
 EOF
+# mktemp creates mode 0600, while the pinned soju image runs non-root. The
+# fixture contains no secret and must be readable through the read-only bind.
+chmod 0644 "$soju_config"
 
 # Pull the immutable release identity explicitly. The CI runner is amd64; the
 # multi-platform index digest selects the amd64 manifest for the runtime gate.
