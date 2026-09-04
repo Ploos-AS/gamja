@@ -14,8 +14,8 @@ Environment=GAMJA_SERVER_URL=/socket
 ReadOnly=true
 Tmpfs=/tmp
 LogDriver=journald
-Memory=128m
 PidsLimit=128
+PodmanArgs=--memory=128m
 HealthCmd=wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1
 HealthInterval=30s
 HealthTimeout=5s
