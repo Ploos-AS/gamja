@@ -10,15 +10,21 @@ A release candidate must satisfy all of the following on `main`:
 - container runs non-root with a read-only root filesystem
 - health check reaches `healthy`
 - Gamja `/socket` performs a real WebSocket upgrade through nginx to soju
+- final runtime image has no fixable `HIGH` or `CRITICAL` OS/library vulnerabilities according to the pinned Trivy qualification
+- repository files have no `HIGH` or `CRITICAL` Trivy secret or misconfiguration findings
+- security qualification runs before GHCR authentication and image publication
 - multi-platform image contains linux/amd64 and linux/arm64
 - base images are pinned by multi-platform digest
 - GitHub Actions are pinned by commit SHA
 - upstream Gamja source is pinned by commit SHA
 - QEMU/binfmt is pinned to a named release and only the required arm64 emulator is installed
 - BuildKit is pinned to a named release instead of the floating default builder image
+- Trivy is pinned to an explicit engine version and the Trivy GitHub Action is pinned by immutable commit SHA
 - OCI license metadata is explicitly set to `AGPL-3.0-only`
 - SBOM generation is enabled for published images
 - BuildKit provenance is enabled with `mode=max`
+
+The M1.7 security policy is documented in `SECURITY.md`. The dedicated `security` workflow also re-runs the security qualification daily so newly disclosed vulnerabilities can be detected even without a source-code change.
 
 ## Versioning
 
@@ -54,11 +60,11 @@ The release workflow is idempotent. Re-running it for an already published GitHu
 
 ## Release steps
 
-1. Confirm the latest `main` workflow completed successfully.
+1. Confirm the latest `main` container and security workflows completed successfully.
 2. Confirm the worktree/repository state represented by `main` is the intended release state.
 3. Create the annotated release tag from that exact `main` commit.
-4. Wait for the tag-triggered `container` workflow to complete successfully.
+4. Wait for the tag-triggered `container` workflow to complete successfully, including the release-blocking M1.7 security scans.
 5. The generic release workflow creates the GitHub Release from the successful tag run and records the published OCI index digest.
-6. Verify the GitHub Release, versioned image, linux/amd64 and linux/arm64 manifests, SBOM, and provenance.
+6. Verify the GitHub Release, versioned image, linux/amd64 and linux/arm64 manifests, SBOM, provenance, and security qualification.
 
 Published tags are immutable release artifacts. Fixes after publication require a new semantic version.
