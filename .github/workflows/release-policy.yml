@@ -94,6 +94,62 @@ jobs:
           test "$signing_line" -lt "$consumer_line"
           test "$consumer_line" -lt "$release_line"
 
+      - name: Qualify M1.20 post-release audit policy
+        run: |
+          set -euo pipefail
+          bash -n ./scripts/audit-release.sh
+          chmod +x ./scripts/audit-release.sh
+          mkdir -p /tmp/m120-fixtures /tmp/m120-bin
+          cp /tmp/evidence-a.json /tmp/m120-fixtures/release-evidence.json
+          cp /tmp/evidence-a.json.sha256 /tmp/m120-fixtures/release-evidence.json.sha256
+          printf '{}\n' > /tmp/m120-fixtures/release-evidence.bundle.json
+
+          cat > /tmp/m120-bin/git <<'EOF'
+          #!/bin/sh
+          if [ "${1:-}" = rev-parse ]; then
+            printf '%s\n' "${M120_GIT_COMMIT:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}"
+            exit 0
+          fi
+          exit 2
+          EOF
+
+          cat > /tmp/m120-bin/gh <<'EOF'
+          #!/bin/sh
+          set -eu
+          if [ "${1:-}" = release ] && [ "${2:-}" = view ]; then
+            if [ "${M120_EXTRA_ASSET:-0}" = 1 ]; then
+              printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"assets":[{"name":"release-evidence.bundle.json","size":3},{"name":"release-evidence.json","size":1},{"name":"release-evidence.json.sha256","size":1},{"name":"unexpected.bin","size":1}]}'
+            else
+              printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"assets":[{"name":"release-evidence.bundle.json","size":3},{"name":"release-evidence.json","size":1},{"name":"release-evidence.json.sha256","size":1}]}'
+            fi
+            exit 0
+          fi
+          if [ "${1:-}" = release ] && [ "${2:-}" = download ]; then
+            dir=''
+            while [ "$#" -gt 0 ]; do
+              if [ "$1" = --dir ]; then shift; dir=$1; fi
+              shift || true
+            done
+            test -n "$dir"
+            cp /tmp/m120-fixtures/release-evidence.json "$dir/"
+            cp /tmp/m120-fixtures/release-evidence.json.sha256 "$dir/"
+            cp /tmp/m120-fixtures/release-evidence.bundle.json "$dir/"
+            exit 0
+          fi
+          exit 2
+          EOF
+          chmod +x /tmp/m120-bin/git /tmp/m120-bin/gh
+
+          PATH="/tmp/m120-bin:$PATH" GITHUB_REPOSITORY=Ploos-AS/gamja ./scripts/audit-release.sh --metadata-only v1.2.3
+          ! PATH="/tmp/m120-bin:$PATH" M120_EXTRA_ASSET=1 GITHUB_REPOSITORY=Ploos-AS/gamja ./scripts/audit-release.sh --metadata-only v1.2.3 >/dev/null 2>&1
+          ! PATH="/tmp/m120-bin:$PATH" M120_GIT_COMMIT=cccccccccccccccccccccccccccccccccccccccc GITHUB_REPOSITORY=Ploos-AS/gamja ./scripts/audit-release.sh --metadata-only v1.2.3 >/dev/null 2>&1
+
+          grep -Fq "cron: '17 6 * * 1'" .github/workflows/release-verification.yml
+          grep -Fq './scripts/audit-release.sh "$TAG"' .github/workflows/release-verification.yml
+          grep -Fq 'fetch-depth: 0' .github/workflows/release-verification.yml
+          grep -Fq 'release-evidence.bundle.json' scripts/audit-release.sh
+          grep -Fq '(.size // 0) > 0' scripts/audit-release.sh
+
       - name: Qualify M1.16 and M1.17 digest-bound runtime gate
         run: |
           set -euo pipefail
@@ -122,18 +178,18 @@ jobs:
           grep -Fq 'types: [published]' .github/workflows/release-verification.yml
           grep -Fq 'release-evidence.json.sha256' .github/workflows/release-verification.yml
           grep -Fq 'release-evidence.bundle.json' .github/workflows/release-verification.yml
-          grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
+          grep -Fq './scripts/audit-release.sh' .github/workflows/release-verification.yml
 
       - name: Record release policy
         run: |
           {
-            echo '### M1.19 release integrity qualification'
+            echo '### M1.20 release integrity qualification'
             echo
-            echo '- strict tag, commit, OCI revision, image signature and attestation binding preserved'
-            echo '- exact digest runtime qualification remains mandatory on linux/amd64 and linux/arm64'
-            echo '- M1.18 runtime-bound evidence is generated only after both runtime qualifications pass'
-            echo '- M1.19 signs the exact evidence JSON keylessly with GitHub OIDC from release.yml@refs/heads/main'
-            echo '- full consumer verification requires the Cosign evidence bundle; checksum-only evidence is insufficient'
-            echo '- published release verification downloads and verifies JSON, checksum and keyless evidence bundle'
-            echo '- runtime -> evidence -> evidence signature -> consumer verification -> GitHub Release ordering is policy-enforced'
+            echo '- M1.19 keyless signed evidence remains mandatory before publication'
+            echo '- M1.20 audits the GitHub Release object after publication and on a weekly schedule'
+            echo '- audit requires a non-draft release and the exact three signed-evidence assets, all non-empty'
+            echo '- Git tag commit must equal the commit recorded in release evidence'
+            echo '- full audit reuses the canonical M1.19 consumer verifier for evidence signature, OCI signature and attestations'
+            echo '- deterministic policy tests reject unexpected assets and tag/evidence commit mismatches'
+            echo '- legacy releases without M1.20 signed evidence are not silently classified as compliant'
           } >> "$GITHUB_STEP_SUMMARY"
