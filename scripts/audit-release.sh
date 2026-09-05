@@ -82,4 +82,14 @@ fi
   "$asset_dir/release-evidence.json.sha256" \
   "$asset_dir/release-evidence.bundle.json"
 
-echo "M1.20 release audit passed for $tag ($tag_commit)."
+if [ -n "${AUDIT_RECORD_OUT:-}" ]; then
+  image=$(jq -r '.image // empty' "$asset_dir/release-evidence.json")
+  digest=$(jq -r '.digest // empty' "$asset_dir/release-evidence.json")
+  [ -n "$image" ] || { echo "release evidence has no image" >&2; exit 1; }
+  [ -n "$digest" ] || { echo "release evidence has no digest" >&2; exit 1; }
+  chmod +x "$script_dir/create-audit-record.sh"
+  TAG="$tag" RELEASE_COMMIT="$tag_commit" IMAGE="$image" DIGEST="$digest" \
+    "$script_dir/create-audit-record.sh" "$AUDIT_RECORD_OUT"
+fi
+
+echo "M1.21 release audit passed for $tag ($tag_commit)."
