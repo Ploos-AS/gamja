@@ -19,7 +19,6 @@ command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit
 [ -f "$evidence" ] || { echo "evidence file not found: $evidence" >&2; exit 2; }
 [ -f "$checksum" ] || { echo "checksum file not found: $checksum" >&2; exit 2; }
 
-# Verify the checksum without depending on the caller's path layout.
 expected_sum=$(awk 'NR == 1 {print $1}' "$checksum")
 printf '%s' "$expected_sum" | grep -Eq '^[0-9a-f]{64}$' || { echo "invalid evidence checksum" >&2; exit 1; }
 actual_sum=$(sha256sum "$evidence" | awk '{print $1}')
@@ -50,10 +49,19 @@ jq -e '
   .attestations.sbom == "SPDX" and
   .attestations.provenance == "BuildKit SLSA" and
   .attestations.platforms == ["linux/amd64", "linux/arm64"] and
+  .runtime.platforms == ["linux/amd64", "linux/arm64"] and
+  .runtime.immutable_digest == true and
+  .runtime.uid == 101 and
+  .runtime.read_only_rootfs == true and
+  .runtime.no_new_privileges == true and
+  .runtime.healthy == true and
+  .runtime.generated_config_verified == true and
+  .runtime.websocket_upgrade_verified == true and
   .verification.tag_commit_equals_workflow_commit == true and
   .verification.oci_revision_equals_release_commit == true and
   .verification.signature_verified == true and
-  .verification.attestations_verified == true
+  .verification.attestations_verified == true and
+  .verification.runtime_verified == true
 ' "$evidence" >/dev/null || { echo "release evidence policy fields are invalid" >&2; exit 1; }
 
 echo "Release evidence metadata verified for $tag ($digest)"
@@ -92,4 +100,4 @@ jq -e 'length > 0' "$cosign_file" >/dev/null || { echo "Cosign signature verific
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 "$script_dir/verify-attestations.sh" "$immutable_ref"
 
-echo "Release $tag fully verified: checksum, identity, OCI revision, signature, SPDX SBOM and BuildKit SLSA provenance."
+echo "Release $tag fully verified: checksum, identity, OCI revision, signature, SPDX SBOM, BuildKit SLSA provenance, and recorded amd64/arm64 runtime qualification."
