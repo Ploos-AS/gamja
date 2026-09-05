@@ -98,14 +98,16 @@ jobs:
             exit 1
           fi
 
-      - name: Verify production M1.23 wiring
+      - name: Verify production M1.23/M1.24 wiring
         run: |
           set -euo pipefail
           grep -Fq 'id-token: write' .github/workflows/release-verification.yml
-          grep -Fq 'cosign sign-blob --yes' .github/workflows/release-verification.yml
-          grep -Fq '/tmp/release-audit.bundle.json' .github/workflows/release-verification.yml
+          grep -Fq 'cosign sign-blob --yes' scripts/retain-audit-record.sh
+          grep -Fq 'release-audit.bundle.json' scripts/retain-audit-record.sh
           grep -Fq 'release-verification.yml@refs/heads/main' scripts/verify-audit-record.sh
+          grep -Fq './scripts/retain-audit-record.sh' .github/workflows/release-verification.yml
           grep -Fq 'M1.23' RELEASE-AUDIT.md
+          grep -Fq 'M1.24' RELEASE-AUDIT.md
 
       - name: Record M1.23 policy
         run: |
@@ -117,5 +119,5 @@ jobs:
             echo '- expected workflow identity is enforced'
             echo '- expected GitHub Actions OIDC issuer is enforced'
             echo '- rechecksummed tampered bytes are rejected by the original signature bundle'
-            echo '- production signs and verifies before immutable Actions artifact archival'
+            echo '- M1.24 retains the first valid M1.23 bundle durably and reuses it without overwrite'
           } >> "$GITHUB_STEP_SUMMARY"
