@@ -179,7 +179,7 @@ jobs:
           grep -Fq './scripts/audit-release.sh' .github/workflows/release-verification.yml
           grep -Fq 'release-evidence.json.sha256' scripts/audit-release.sh
           grep -Fq 'release-evidence.bundle.json' scripts/audit-release.sh
-          grep -Fq './scripts/verify-release.sh' scripts/audit-release.sh
+          grep -Fq 'verify-release.sh' scripts/audit-release.sh
 
       - name: Record release policy
         run: |
