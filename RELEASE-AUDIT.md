@@ -6,6 +6,8 @@ M1.21 adds a deterministic machine-readable record of each successful full audit
 
 M1.22 adds the canonical consumer for that archived record. It verifies the exact checksum filename and bytes, enforces the closed audit-record v1 schema, validates release/commit/digest syntax, and requires every recorded verification claim to remain true before the record is trusted or archived.
 
+M1.23 cryptographically authenticates the deterministic audit record itself. `release-verification.yml` keylessly signs the exact `release-audit.json` bytes with Cosign and GitHub Actions OIDC, writes a Sigstore bundle beside the deterministic JSON/checksum pair, and verifies that bundle against the expected workflow identity before archival.
+
 ## Audit command
 
 For an M1.20-compatible release:
@@ -70,19 +72,53 @@ The JSON intentionally contains no wall-clock timestamp, runner name, workflow r
 
 ## M1.22 canonical audit consumer
 
-`scripts/verify-audit-record.sh` is the canonical offline consumer for the M1.21 record pair. It accepts exactly:
+`scripts/verify-audit-record.sh` is the canonical consumer for the M1.21 record pair. With two arguments it validates deterministic byte integrity and the closed v1 semantic contract:
 
 ```sh
 ./scripts/verify-audit-record.sh release-audit.json release-audit.json.sha256
 ```
 
-It requires both files to share a directory and their canonical names. The checksum file must contain exactly a lowercase SHA-256 for `release-audit.json`; filename substitution is rejected. The consumer then enforces the closed audit-record v1 contract: exact top-level and nested keys, the canonical schema URI, M1.21 producer identity, valid SemVer tag, 40-character lowercase Git commit, exact lowercase sha256 OCI digest, immutable image marker, the exact verifier identities, and the complete known verification-claim set with every value `true`.
+It requires both files to share a directory and their canonical names. The checksum file must contain exactly a lowercase SHA-256 for `release-audit.json`; filename substitution is rejected. The consumer then enforces exact top-level and nested keys, the canonical schema URI, M1.21 producer identity, valid SemVer tag, 40-character lowercase Git commit, exact lowercase sha256 OCI digest, immutable image marker, the exact verifier identities, and the complete known verification-claim set with every value `true`.
 
 This distinction is intentional: M1.21 produces a deterministic audit result, while M1.22 defines how a consumer decides whether that result is structurally trustworthy. A checksum alone is not sufficient because an attacker or accidental process could modify and rechecksum semantically false JSON.
 
-`.github/workflows/release-verification.yml` now runs the canonical M1.22 consumer after generating the checksum and before `actions/upload-artifact`. A record that fails byte integrity or schema/claim validation is therefore never archived as a successful audit artifact.
+## M1.23 keyless audit-record signature
 
-The audit record remains evidence that the complete verifier succeeded at audit time. It does not replace the signed release evidence or the immutable OCI digest, and consumers can always rerun the canonical online audit independently.
+After the M1.22 consumer accepts the record, `release-verification.yml` signs the exact `release-audit.json` bytes with:
+
+```sh
+cosign sign-blob --yes \
+  --bundle release-audit.bundle.json \
+  release-audit.json
+```
+
+The deterministic JSON and checksum remain unchanged. Signature material lives separately in `release-audit.bundle.json`, so the M1.21 reproducibility property is preserved.
+
+The canonical M1.23 verification form adds the bundle as a third argument:
+
+```sh
+./scripts/verify-audit-record.sh \
+  release-audit.json \
+  release-audit.json.sha256 \
+  release-audit.bundle.json
+```
+
+The verifier first repeats every M1.22 checksum/schema/claim check, then verifies the Cosign bundle against:
+
+- OIDC issuer: `https://token.actions.githubusercontent.com`
+- workflow identity: `https://github.com/Ploos-AS/gamja/.github/workflows/release-verification.yml@refs/heads/main`
+
+Production uses those defaults. `AUDIT_RECORD_IDENTITY` and `AUDIT_RECORD_OIDC_ISSUER` exist only so deterministic policy workflows can verify their own short-lived OIDC identity and exercise negative identity/issuer cases.
+
+A modified record cannot be made trustworthy merely by generating a new SHA-256 file: the original M1.23 signature covers the exact JSON bytes. A bundle from another workflow identity or issuer is rejected.
+
+`.github/workflows/release-verification.yml` signs and verifies the bundle before `actions/upload-artifact`, then archives exactly:
+
+- `release-audit.json`
+- `release-audit.json.sha256`
+- `release-audit.bundle.json`
+
+The audit record remains evidence that the complete verifier succeeded at audit time. It does not replace the signed release evidence or immutable OCI digest, and consumers can always rerun the canonical online audit independently.
 
 ## Continuous audit
 
@@ -100,6 +136,8 @@ Legacy releases without `release-evidence.bundle.json` are not labeled M1.20+ co
 
 `audit-record-policy` exercises the M1.21 record generator twice with identical inputs and requires byte-identical output. It validates the checksum, rejects malformed OCI digests, verifies archive wiring, and independently fetches the exact pinned `actions/upload-artifact` commit.
 
-`audit-consumer-policy` exercises M1.22 entirely offline. It accepts a canonical fixture and rejects byte tampering, a rechecksummed false verification claim, unknown top-level fields, and checksum filename substitution. It also verifies that the production audit workflow invokes the same consumer before archival.
+`audit-consumer-policy` exercises M1.22 entirely offline. It accepts a canonical fixture and rejects byte tampering, a rechecksummed false verification claim, unknown top-level fields, and checksum filename substitution.
+
+`audit-signature-policy` exercises M1.23 with a real short-lived GitHub Actions OIDC identity. It keylessly signs the exact fixture bytes, verifies the expected workflow identity, rejects the production identity when it did not sign the fixture, rejects a wrong issuer, and rejects tampered/rechecksummed bytes against the original bundle.
 
 `--metadata-only` is solely for deterministic M1.20 policy tests. It does not replace the full cryptographic/OCI audit and cannot produce an M1.21 compliance record.
