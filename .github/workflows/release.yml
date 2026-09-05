@@ -51,28 +51,24 @@ jobs:
             *) echo "Release ref $TAG does not resolve to a commit" >&2; exit 1 ;;
           esac
           test -n "$tag_commit"
-          if [ "$tag_commit" != "$WORKFLOW_COMMIT" ]; then
-            echo "Release integrity failure: tag $TAG resolves to $tag_commit, container workflow built $WORKFLOW_COMMIT" >&2
-            exit 1
-          fi
+          test "$tag_commit" = "$WORKFLOW_COMMIT" || { echo "tag/container commit mismatch" >&2; exit 1; }
           image="$REGISTRY/$IMAGE_NAME:$version"
           token="$(curl -fsSL "https://ghcr.io/token?scope=repository:$IMAGE_NAME:pull" | jq -r .token)"
-          manifest="$(curl -fsSL -H "Authorization: Bearer $token" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version")"
-          digest="$(curl -fsSI -H "Authorization: Bearer $token" -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version" | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2; exit}')"
+          accept='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'
+          manifest="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: $accept" "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version")"
+          digest="$(curl -fsSI -H "Authorization: Bearer $token" -H "Accept: $accept" "https://ghcr.io/v2/$IMAGE_NAME/manifests/$version" | tr -d '\r' | awk -F': ' 'tolower($1)=="docker-content-digest" {print $2; exit}')"
           test -n "$digest"
-          jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")' <<<"$manifest" >/dev/null
-          jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' <<<"$manifest" >/dev/null
+          jq -e 'any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64") and any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")' <<<"$manifest" >/dev/null
           image_revision="$(jq -r '.annotations["org.opencontainers.image.revision"] // empty' <<<"$manifest")"
-          if [ "$image_revision" != "$WORKFLOW_COMMIT" ]; then
-            echo "Release integrity failure: OCI revision '$image_revision' != release commit '$WORKFLOW_COMMIT'" >&2
-            exit 1
-          fi
-          echo "eligible=true" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "release_commit=$WORKFLOW_COMMIT" >> "$GITHUB_OUTPUT"
+          test "$image_revision" = "$WORKFLOW_COMMIT" || { echo "OCI revision mismatch" >&2; exit 1; }
+          {
+            echo "eligible=true"
+            echo "tag=$TAG"
+            echo "version=$version"
+            echo "image=$image"
+            echo "digest=$digest"
+            echo "release_commit=$WORKFLOW_COMMIT"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
         if: steps.meta.outputs.eligible == 'true'
@@ -82,54 +78,22 @@ jobs:
         if: steps.meta.outputs.eligible == 'true'
         env:
           DIGEST: ${{ steps.meta.outputs.digest }}
-        shell: bash
         run: |
           set -euo pipefail
-          test -n "$DIGEST"
           cosign verify \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity-regexp '^https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/tags/v.*$' \
             "ghcr.io/ploos-as/gamja@$DIGEST" >/tmp/release-cosign-verification.json
           jq -e 'length > 0' /tmp/release-cosign-verification.json >/dev/null
-          echo 'M1.12 release gate: keyless signature verified for exact release digest.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify release SBOM and provenance attestations
         if: steps.meta.outputs.eligible == 'true'
         env:
           DIGEST: ${{ steps.meta.outputs.digest }}
-        shell: bash
         run: |
           set -euo pipefail
           chmod +x ./scripts/verify-attestations.sh
           ./scripts/verify-attestations.sh "ghcr.io/ploos-as/gamja@$DIGEST"
-          echo 'M1.13 release gate: SPDX SBOM and BuildKit SLSA provenance verified for amd64 and arm64.' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Generate M1.14 release evidence
-        if: steps.meta.outputs.eligible == 'true'
-        env:
-          TAG: ${{ steps.meta.outputs.tag }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          IMAGE: ${{ steps.meta.outputs.image }}
-          DIGEST: ${{ steps.meta.outputs.digest }}
-          RELEASE_COMMIT: ${{ steps.meta.outputs.release_commit }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/create-release-evidence.sh
-          ./scripts/create-release-evidence.sh /tmp/release-evidence.json
-          (cd /tmp && sha256sum release-evidence.json > release-evidence.json.sha256)
-          (cd /tmp && sha256sum -c release-evidence.json.sha256)
-          jq -e --arg digest "$DIGEST" --arg commit "$RELEASE_COMMIT" '.digest == $digest and .release_commit == $commit and .verification.signature_verified and .verification.attestations_verified' /tmp/release-evidence.json >/dev/null
-          echo 'M1.14 release evidence generated and checksummed for the exact verified OCI digest.' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify M1.15 consumer release path
-        if: steps.meta.outputs.eligible == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/verify-release.sh ./scripts/verify-attestations.sh
-          ./scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256
-          echo 'M1.15 consumer verifier accepted the exact release evidence and OCI artifact before publication.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up QEMU for M1.17 runtime qualification
         if: steps.meta.outputs.eligible == 'true'
@@ -142,13 +106,37 @@ jobs:
         if: steps.meta.outputs.eligible == 'true'
         env:
           DIGEST: ${{ steps.meta.outputs.digest }}
-        shell: bash
         run: |
           set -euo pipefail
           chmod +x ./scripts/qualify-release-runtime.sh
           ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/amd64
           ./scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/arm64
-          echo 'M1.17 release gate: exact immutable OCI digest passed non-root/read-only health, config and real WebSocket runtime qualification on amd64 and arm64.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'M1.17 release gate passed on amd64 and arm64.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate M1.18 runtime-bound release evidence
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          RELEASE_COMMIT: ${{ steps.meta.outputs.release_commit }}
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-release-evidence.sh
+          ./scripts/create-release-evidence.sh /tmp/release-evidence.json
+          (cd /tmp && sha256sum release-evidence.json > release-evidence.json.sha256)
+          (cd /tmp && sha256sum -c release-evidence.json.sha256)
+          jq -e --arg digest "$DIGEST" --arg commit "$RELEASE_COMMIT" '.digest == $digest and .release_commit == $commit and .verification.signature_verified and .verification.attestations_verified and .verification.runtime_verified and .runtime.platforms == ["linux/amd64","linux/arm64"]' /tmp/release-evidence.json >/dev/null
+          echo 'M1.18 evidence binds the exact digest to completed amd64 and arm64 runtime qualification.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify M1.18 consumer release path
+        if: steps.meta.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/verify-release.sh ./scripts/verify-attestations.sh
+          ./scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256
+          echo 'M1.18 consumer verifier accepted runtime-bound evidence before publication.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
@@ -159,7 +147,6 @@ jobs:
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.meta.outputs.digest }}
           RELEASE_COMMIT: ${{ steps.meta.outputs.release_commit }}
-        shell: bash
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -173,24 +160,16 @@ jobs:
           - non-root nginx runtime on port 8080 with read-only-root-filesystem support
           - runtime-generated Gamja configuration and built-in \`/socket\` WebSocket proxy to soju
           - qualified Docker Compose and rootless Podman Quadlet production deployments
-          - qualified HTTPS/WSS reverse-proxy paths and production backup/restore
           - release-blocking HIGH/CRITICAL Trivy security qualification
           - multi-architecture OCI image for \`linux/amd64\` and \`linux/arm64\`
-          - SPDX SBOM and BuildKit SLSA provenance (mode=max), verified for both platforms
-          - OCI revision annotation verified against the exact release tag commit
-          - Cosign keyless signature verified for the exact release digest before GitHub Release creation
-          - machine-readable M1.14 release evidence plus SHA-256 checksum attached to this release
-          - M1.15 consumer verifier qualified against the same evidence, signature and attestations before publication
-          - M1.17 exact release digest executed and qualified non-root/read-only with health, generated config and real soju WebSocket upgrade on both amd64 and arm64
+          - SPDX SBOM and BuildKit SLSA provenance verified for both platforms
+          - OCI revision and Cosign keyless signature verified against the exact release artifact
+          - exact release digest executed non-root/read-only with health, generated config and real soju WebSocket upgrade on amd64 and arm64
+          - M1.18 machine-readable evidence records that completed multi-architecture runtime qualification
 
-          Container image:
-          \`$IMAGE\`
-
-          OCI index digest:
-          \`$DIGEST\`
-
-          Release commit:
-          \`$RELEASE_COMMIT\`
+          Container image: \`$IMAGE\`
+          OCI index digest: \`$DIGEST\`
+          Release commit: \`$RELEASE_COMMIT\`
           EOF
           gh release create "$TAG" \
             /tmp/release-evidence.json \
