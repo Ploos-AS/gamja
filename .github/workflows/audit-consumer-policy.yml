@@ -1,0 +1,93 @@
+name: audit-consumer-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-consumer-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Qualify canonical M1.22 consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-audit-record.sh ./scripts/verify-audit-record.sh
+          export TAG=v1.2.3
+          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          export IMAGE=ghcr.io/ploos-as/gamja:1.2.3
+          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ./scripts/create-audit-record.sh /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256
+
+      - name: Reject tampered audit record
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/release-audit.json /tmp/release-audit-good.json
+          jq '.verification.runtime_arm64 = false' /tmp/release-audit-good.json > /tmp/release-audit.json
+          if ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256 >/dev/null 2>&1; then
+            echo 'M1.22 consumer accepted a record whose bytes no longer match its checksum' >&2
+            exit 1
+          fi
+
+      - name: Reject semantically invalid rechecksummed record
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '.verification.runtime_arm64 = false' /tmp/release-audit-good.json > /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          if ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256 >/dev/null 2>&1; then
+            echo 'M1.22 consumer accepted a false verification claim after rechecksumming' >&2
+            exit 1
+          fi
+
+          jq '.unexpected = true' /tmp/release-audit-good.json > /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          if ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256 >/dev/null 2>&1; then
+            echo 'M1.22 consumer accepted an unknown top-level field' >&2
+            exit 1
+          fi
+
+      - name: Reject checksum substitution
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/release-audit-good.json /tmp/release-audit.json
+          printf '%064d  other.json\n' 0 > /tmp/release-audit.json.sha256
+          if ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256 >/dev/null 2>&1; then
+            echo 'M1.22 consumer accepted a checksum for another filename' >&2
+            exit 1
+          fi
+
+      - name: Verify M1.22 workflow wiring
+        run: |
+          set -euo pipefail
+          grep -Fq 'verify-audit-record.sh' .github/workflows/release-verification.yml
+          grep -Fq 'M1.22' RELEASE-AUDIT.md
+          grep -Fq './scripts/verify-audit-record.sh' README.md
+
+      - name: Record M1.22 policy
+        run: |
+          {
+            echo '### M1.22 audit consumer qualification'
+            echo
+            echo '- canonical checksum plus schema verifier accepts a valid deterministic M1.21 record'
+            echo '- byte tampering is rejected before semantic trust'
+            echo '- rechecksummed false verification claims are rejected'
+            echo '- unknown top-level fields are rejected by the closed v1 schema contract'
+            echo '- checksum filename substitution is rejected'
+            echo '- release-verification invokes the same canonical consumer before archival'
+          } >> "$GITHUB_STEP_SUMMARY"
