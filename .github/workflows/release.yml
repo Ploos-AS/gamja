@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: read
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -130,13 +131,32 @@ jobs:
           jq -e --arg digest "$DIGEST" --arg commit "$RELEASE_COMMIT" '.digest == $digest and .release_commit == $commit and .verification.signature_verified and .verification.attestations_verified and .verification.runtime_verified and .runtime.platforms == ["linux/amd64","linux/arm64"]' /tmp/release-evidence.json >/dev/null
           echo 'M1.18 evidence binds the exact digest to completed amd64 and arm64 runtime qualification.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify M1.18 consumer release path
+      - name: Sign and verify M1.19 release evidence
+        if: steps.meta.outputs.eligible == 'true'
+        run: |
+          set -euo pipefail
+          cosign sign-blob \
+            --yes \
+            --bundle /tmp/release-evidence.bundle.json \
+            /tmp/release-evidence.json
+          test -s /tmp/release-evidence.bundle.json
+          cosign verify-blob \
+            --bundle /tmp/release-evidence.bundle.json \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity https://github.com/Ploos-AS/gamja/.github/workflows/release.yml@refs/heads/main \
+            /tmp/release-evidence.json
+          echo 'M1.19 evidence has a keyless GitHub OIDC signature bound to release.yml@refs/heads/main.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify M1.19 consumer release path
         if: steps.meta.outputs.eligible == 'true'
         run: |
           set -euo pipefail
           chmod +x ./scripts/verify-release.sh ./scripts/verify-attestations.sh
-          ./scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256
-          echo 'M1.18 consumer verifier accepted runtime-bound evidence before publication.' >> "$GITHUB_STEP_SUMMARY"
+          ./scripts/verify-release.sh \
+            /tmp/release-evidence.json \
+            /tmp/release-evidence.json.sha256 \
+            /tmp/release-evidence.bundle.json
+          echo 'M1.19 consumer verifier accepted cryptographically signed runtime-bound evidence before publication.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create GitHub release if missing
         if: steps.meta.outputs.eligible == 'true'
@@ -163,9 +183,9 @@ jobs:
           - release-blocking HIGH/CRITICAL Trivy security qualification
           - multi-architecture OCI image for \`linux/amd64\` and \`linux/arm64\`
           - SPDX SBOM and BuildKit SLSA provenance verified for both platforms
-          - OCI revision and Cosign keyless signature verified against the exact release artifact
+          - OCI revision and Cosign keyless image signature verified against the exact release artifact
           - exact release digest executed non-root/read-only with health, generated config and real soju WebSocket upgrade on amd64 and arm64
-          - M1.18 machine-readable evidence records that completed multi-architecture runtime qualification
+          - runtime-bound machine-readable evidence is itself keyless-signed by the release workflow and independently consumer-verifiable
 
           Container image: \`$IMAGE\`
           OCI index digest: \`$DIGEST\`
@@ -174,6 +194,7 @@ jobs:
           gh release create "$TAG" \
             /tmp/release-evidence.json \
             /tmp/release-evidence.json.sha256 \
+            /tmp/release-evidence.bundle.json \
             --repo "$GITHUB_REPOSITORY" \
             --title "Gamja container $TAG" \
             --notes-file /tmp/release-notes.md \
