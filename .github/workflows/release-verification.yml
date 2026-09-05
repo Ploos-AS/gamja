@@ -13,7 +13,7 @@ on:
     - cron: '17 6 * * 1'
 
 permissions:
-  contents: read
+  contents: write
   packages: read
   id-token: write
 
@@ -81,27 +81,22 @@ jobs:
           (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
           ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256
 
-      - name: Sign M1.23 audit record
+      - name: Retain and verify M1.24 durable audit record
         if: steps.meta.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          cosign sign-blob --yes \
-            --bundle /tmp/release-audit.bundle.json \
-            /tmp/release-audit.json >/dev/null
+          chmod +x ./scripts/retain-audit-record.sh ./scripts/verify-audit-record.sh
+          ./scripts/retain-audit-record.sh \
+            "$TAG" \
+            /tmp/release-audit.json \
+            /tmp/release-audit.json.sha256
           test -s /tmp/release-audit.bundle.json
 
-      - name: Verify M1.23 signed audit record
-        if: steps.meta.outputs.eligible == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./scripts/verify-audit-record.sh \
-            /tmp/release-audit.json \
-            /tmp/release-audit.json.sha256 \
-            /tmp/release-audit.bundle.json
-
-      - name: Archive M1.23 signed audit record
+      - name: Archive M1.24 signed audit record cache
         id: audit_artifact
         if: steps.meta.outputs.eligible == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7, Node 24
@@ -115,7 +110,7 @@ jobs:
           retention-days: 90
           compression-level: 0
 
-      - name: Record M1.23 audit
+      - name: Record M1.24 audit
         if: steps.meta.outputs.eligible == 'true'
         env:
           TAG: ${{ steps.meta.outputs.tag }}
@@ -123,11 +118,11 @@ jobs:
           ARTIFACT_URL: ${{ steps.audit_artifact.outputs.artifact-url }}
         run: |
           {
-            echo "### M1.23 post-release audit"
+            echo "### M1.24 durable post-release audit"
             echo
             echo "- release: $TAG"
             echo "- GitHub Release is non-draft and tag identity matches"
-            echo "- uploaded release asset set is exactly the three signed-evidence assets"
+            echo "- release envelope is exactly the M1.20 evidence triplet or the completed M1.24 six-asset set"
             echo "- Git tag commit equals release-evidence commit"
             echo "- evidence checksum and M1.19 keyless signature verified"
             echo "- exact OCI revision and image Cosign identity verified"
@@ -135,8 +130,9 @@ jobs:
             echo "- recorded amd64/arm64 runtime qualification verified"
             echo "- deterministic M1.21 audit record generated"
             echo "- canonical M1.22 consumer verified checksum, closed schema and all claims"
-            echo "- exact audit-record bytes keylessly signed by release-verification.yml via GitHub OIDC"
-            echo "- M1.23 Cosign bundle verified before archival"
-            echo "- immutable Actions artifact digest: $ARTIFACT_DIGEST"
-            echo "- audit artifact: $ARTIFACT_URL"
+            echo "- exact audit-record bytes are covered by the M1.23 GitHub OIDC/Cosign signature"
+            echo "- signed audit triplet is retained as durable GitHub Release assets"
+            echo "- existing durable audit assets are never overwritten; later audits must reproduce JSON/checksum byte-for-byte and verify the original bundle"
+            echo "- secondary 90-day Actions artifact digest: $ARTIFACT_DIGEST"
+            echo "- secondary audit cache: $ARTIFACT_URL"
           } >> "$GITHUB_STEP_SUMMARY"
