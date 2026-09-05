@@ -65,12 +65,33 @@ jobs:
             exit 1
           fi
 
+      - name: Qualify M1.19 keyless evidence signing policy
+        run: |
+          set -euo pipefail
+          jq -e '.evidence_signature.scheme == "cosign-keyless-blob" and .evidence_signature.oidc_issuer == "https://token.actions.githubusercontent.com" and .evidence_signature.workflow_identity == "https://github.com/Ploos-AS/gamja/.github/workflows/release.yml@refs/heads/main"' /tmp/evidence-a.json >/dev/null
+          grep -Fq 'id-token: write' .github/workflows/release.yml
+          grep -Fq 'cosign sign-blob' .github/workflows/release.yml
+          grep -Fq -- '--bundle /tmp/release-evidence.bundle.json' .github/workflows/release.yml
+          grep -Fq 'cosign verify-blob' .github/workflows/release.yml
+          grep -Fq 'release.yml@refs/heads/main' .github/workflows/release.yml
+          grep -Fq 'cosign verify-blob' scripts/verify-release.sh
+          grep -Fq 'signed evidence bundle is required for full verification' scripts/verify-release.sh
+          grep -Fq 'release-evidence.bundle.json' .github/workflows/release-verification.yml
+          grep -Fq '/tmp/release-evidence.bundle.json' .github/workflows/release.yml
+
+          if ./scripts/verify-release.sh /tmp/evidence-a.json /tmp/evidence-a.json.sha256 >/dev/null 2>&1; then
+            echo 'full consumer verification accepted unsigned evidence without a bundle' >&2
+            exit 1
+          fi
+
           runtime_line=$(grep -n 'Qualify M1.17 exact release runtime on amd64 and arm64' .github/workflows/release.yml | cut -d: -f1)
           evidence_line=$(grep -n 'Generate M1.18 runtime-bound release evidence' .github/workflows/release.yml | cut -d: -f1)
-          consumer_line=$(grep -n 'Verify M1.18 consumer release path' .github/workflows/release.yml | cut -d: -f1)
+          signing_line=$(grep -n 'Sign and verify M1.19 release evidence' .github/workflows/release.yml | cut -d: -f1)
+          consumer_line=$(grep -n 'Verify M1.19 consumer release path' .github/workflows/release.yml | cut -d: -f1)
           release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
           test "$runtime_line" -lt "$evidence_line"
-          test "$evidence_line" -lt "$consumer_line"
+          test "$evidence_line" -lt "$signing_line"
+          test "$signing_line" -lt "$consumer_line"
           test "$consumer_line" -lt "$release_line"
 
       - name: Qualify M1.16 and M1.17 digest-bound runtime gate
@@ -100,17 +121,19 @@ jobs:
           grep -Fq 'release:' .github/workflows/release-verification.yml
           grep -Fq 'types: [published]' .github/workflows/release-verification.yml
           grep -Fq 'release-evidence.json.sha256' .github/workflows/release-verification.yml
+          grep -Fq 'release-evidence.bundle.json' .github/workflows/release-verification.yml
           grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
 
       - name: Record release policy
         run: |
           {
-            echo '### M1.18 release integrity qualification'
+            echo '### M1.19 release integrity qualification'
             echo
-            echo '- strict tag, commit, OCI revision, signature and attestation binding preserved'
+            echo '- strict tag, commit, OCI revision, image signature and attestation binding preserved'
             echo '- exact digest runtime qualification remains mandatory on linux/amd64 and linux/arm64'
-            echo '- release evidence is generated only after both runtime qualifications pass'
-            echo '- evidence records immutable digest, UID 101, read-only rootfs, no-new-privileges, health, generated config and WebSocket qualification'
-            echo '- consumer verification rejects evidence without the M1.18 runtime-qualified state'
-            echo '- runtime -> evidence -> consumer verification -> GitHub Release ordering is policy-enforced'
+            echo '- M1.18 runtime-bound evidence is generated only after both runtime qualifications pass'
+            echo '- M1.19 signs the exact evidence JSON keylessly with GitHub OIDC from release.yml@refs/heads/main'
+            echo '- full consumer verification requires the Cosign evidence bundle; checksum-only evidence is insufficient'
+            echo '- published release verification downloads and verifies JSON, checksum and keyless evidence bundle'
+            echo '- runtime -> evidence -> evidence signature -> consumer verification -> GitHub Release ordering is policy-enforced'
           } >> "$GITHUB_STEP_SUMMARY"
