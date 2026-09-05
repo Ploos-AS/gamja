@@ -26,6 +26,7 @@ Targets and production properties:
 - keyless Cosign signature over the exact release-evidence JSON
 - post-publication M1.20 release audit for Git tag, GitHub Release asset set, signed evidence and immutable OCI state
 - deterministic M1.21 audit record plus checksum archived as an immutable Actions artifact
+- canonical M1.22 audit-record consumer enforcing checksum, closed schema and all verification claims before archival
 - runtime Gamja configuration through environment variables
 - qualified HTTPS/WSS reverse proxies, production Compose and Podman Quadlet deployments
 
@@ -135,11 +136,13 @@ M1.14-M1.18 add deterministic release evidence, canonical consumer verification 
 
 M1.20 adds `scripts/audit-release.sh` and turns `release-verification` into a post-publication audit. It requires a non-draft GitHub Release, the exact three signed-evidence assets, tag/evidence commit equality, and then repeats the complete evidence-signature, OCI-signature and attestation consumer path. The audit runs on publication, manually, and weekly for the newest M1.20-compatible release.
 
-M1.21 adds `scripts/create-audit-record.sh`. Each successful full audit emits deterministic JSON bound to the release tag, peeled Git commit and exact OCI digest, checksums it, and archives JSON plus checksum with a pinned immutable `actions/upload-artifact` commit. Identical unchanged releases produce byte-identical records. See `RELEASE-AUDIT.md`.
+M1.21 adds `scripts/create-audit-record.sh`. Each successful full audit emits deterministic JSON bound to the release tag, peeled Git commit and exact OCI digest, checksums it, and archives JSON plus checksum with a pinned immutable `actions/upload-artifact` commit. Identical unchanged releases produce byte-identical records.
+
+M1.22 adds `scripts/verify-audit-record.sh`, the canonical offline consumer for the M1.21 record pair. It verifies the exact checksum and canonical filenames, enforces the closed v1 schema and exact claim set, validates tag/commit/digest syntax, and requires every verification result to be true. `release-verification` runs this consumer before archival. See `RELEASE-AUDIT.md`.
 
 ## CI qualification
 
-CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless image signatures, digest-bound SBOM/provenance verification, deterministic runtime-bound release evidence, keyless evidence signatures, tamper rejection, exact-digest two-platform release runtime execution, M1.20 post-publication release auditing, and deterministic M1.21 audit-record archival.
+CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless image signatures, digest-bound SBOM/provenance verification, deterministic runtime-bound release evidence, keyless evidence signatures, tamper rejection, exact-digest two-platform release runtime execution, M1.20 post-publication release auditing, deterministic M1.21 audit-record archival, and M1.22 canonical audit-record consumption/tamper rejection.
 
 ## Releases
 
@@ -166,7 +169,13 @@ For a published M1.20+ release, audit the full GitHub Release envelope with:
 ./scripts/audit-release.sh v0.2.0
 ```
 
-For M1.21, `release-verification` additionally archives `release-audit.json` and `release-audit.json.sha256` after each successful full audit. The record is deterministic; the Actions artifact supplies run identity, immutable artifact digest and retention metadata.
+For M1.21+, `release-verification` additionally archives `release-audit.json` and `release-audit.json.sha256` after each successful full audit. Verify an extracted record pair offline with:
+
+```sh
+./scripts/verify-audit-record.sh release-audit.json release-audit.json.sha256
+```
+
+The record is deterministic; the Actions artifact supplies run identity, immutable artifact digest and retention metadata.
 
 Published release tags are immutable. The complete procedure is in `RELEASE.md`; signing is documented in `SIGNING.md`, attestations in `ATTESTATIONS.md`, evidence in `RELEASE-EVIDENCE.md`, runtime qualification in `RELEASE-RUNTIME.md`, and post-publication auditing in `RELEASE-AUDIT.md`.
 
