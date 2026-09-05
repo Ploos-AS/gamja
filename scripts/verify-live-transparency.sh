@@ -15,14 +15,14 @@ command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-"$script_dir/verify-transparency-snapshot.sh" "$index" "$checksum" "$bundle" >/dev/null
+sh "$script_dir/verify-transparency-snapshot.sh" "$index" "$checksum" "$bundle" >/dev/null
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 live="$tmp/release-index.json"
 
-"$script_dir/collect-release-index.sh" "$live" >/dev/null
-"$script_dir/verify-release-index.sh" "$live" >/dev/null
+sh "$script_dir/collect-release-index.sh" "$live" >/dev/null
+sh "$script_dir/verify-release-index.sh" "$live" >/dev/null
 
 if ! cmp -s "$index" "$live"; then
   signed_sha=$(sha256sum "$index" | awk '{print $1}')
