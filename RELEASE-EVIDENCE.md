@@ -48,6 +48,14 @@ runtime -> evidence -> evidence signature -> consumer verification -> GitHub Rel
 
 Unsigned evidence cannot pass the full consumer path.
 
+## M1.20 post-release audit
+
+M1.20 verifies that the published GitHub Release envelope remains consistent with the signed evidence after publication. `scripts/audit-release.sh` requires the GitHub Release to be non-draft, the audited tag to match the evidence, the peeled Git tag commit to match `release_commit`, and the uploaded asset set to contain exactly the three evidence files listed above, all non-empty.
+
+After those release-object checks, the audit invokes the same canonical full consumer verifier used before publication. This re-verifies the evidence signature, OCI revision, image signature, SBOM and provenance against the immutable digest.
+
+The audit runs when a release is published, can be dispatched manually for a selected M1.20+ tag, and runs weekly against the newest release carrying signed evidence. See `RELEASE-AUDIT.md`.
+
 ## Other enforced evidence
 
 Before publication the release path also verifies:
@@ -79,8 +87,14 @@ The Sigstore bundle is intentionally not deterministic: it contains signing mate
   release-evidence.bundle.json
 ```
 
-`--metadata-only` exists only for deterministic policy testing. It validates checksum and evidence semantics without validating the Sigstore bundle or contacting the registry and is not a substitute for full verification.
+For a published M1.20+ release, prefer the envelope audit:
 
-`.github/workflows/release-verification.yml` independently downloads all three public release assets after publication and repeats the full consumer verification path.
+```sh
+./scripts/audit-release.sh v0.2.0
+```
 
-The OCI digest remains the container artifact identity; the M1.19 signature authenticates the release evidence that describes how that artifact was qualified.
+`--metadata-only` modes exist only for deterministic policy testing. They do not validate live Sigstore/OCI state and are not substitutes for full verification.
+
+`.github/workflows/release-verification.yml` independently audits public release metadata and all three public evidence assets after publication and on a weekly schedule.
+
+The OCI digest remains the container artifact identity; the M1.19 signature authenticates the release evidence, and M1.20 continuously checks the published release envelope around it.
