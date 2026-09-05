@@ -9,8 +9,9 @@ fi
 
 evidence=${1:-}
 checksum=${2:-}
+bundle=${3:-}
 if [ -z "$evidence" ] || [ -z "$checksum" ]; then
-  echo "usage: $0 [--metadata-only] <release-evidence.json> <release-evidence.json.sha256>" >&2
+  echo "usage: $0 [--metadata-only] <release-evidence.json> <release-evidence.json.sha256> [release-evidence.bundle.json]" >&2
   exit 2
 fi
 
@@ -32,6 +33,8 @@ digest=$(jq -r '.digest // empty' "$evidence")
 release_commit=$(jq -r '.release_commit // empty' "$evidence")
 identity=$(jq -r '.signature.workflow_identity // empty' "$evidence")
 issuer=$(jq -r '.signature.oidc_issuer // empty' "$evidence")
+evidence_identity=$(jq -r '.evidence_signature.workflow_identity // empty' "$evidence")
+evidence_issuer=$(jq -r '.evidence_signature.oidc_issuer // empty' "$evidence")
 
 [ "$schema" = "https://github.com/Ploos-AS/gamja/blob/main/RELEASE-EVIDENCE.md" ] || { echo "unexpected evidence schema: $schema" >&2; exit 1; }
 printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$' || { echo "invalid release tag in evidence: $tag" >&2; exit 1; }
@@ -42,10 +45,14 @@ printf '%s' "$release_commit" | grep -Eq '^[0-9a-f]{40}$' || { echo "invalid rel
 [ "$issuer" = "https://token.actions.githubusercontent.com" ] || { echo "unexpected OIDC issuer" >&2; exit 1; }
 expected_identity="https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/tags/$tag"
 [ "$identity" = "$expected_identity" ] || { echo "unexpected workflow identity: $identity" >&2; exit 1; }
+[ "$evidence_issuer" = "https://token.actions.githubusercontent.com" ] || { echo "unexpected evidence OIDC issuer" >&2; exit 1; }
+expected_evidence_identity="https://github.com/Ploos-AS/gamja/.github/workflows/release.yml@refs/heads/main"
+[ "$evidence_identity" = "$expected_evidence_identity" ] || { echo "unexpected evidence workflow identity: $evidence_identity" >&2; exit 1; }
 
 jq -e '
   .platforms == ["linux/amd64", "linux/arm64"] and
   .signature.scheme == "cosign-keyless" and
+  .evidence_signature.scheme == "cosign-keyless-blob" and
   .attestations.sbom == "SPDX" and
   .attestations.provenance == "BuildKit SLSA" and
   .attestations.platforms == ["linux/amd64", "linux/arm64"] and
@@ -70,8 +77,18 @@ if [ "$mode" = metadata ]; then
   exit 0
 fi
 
+[ -n "$bundle" ] || { echo "signed evidence bundle is required for full verification" >&2; exit 2; }
+[ -f "$bundle" ] || { echo "evidence signature bundle not found: $bundle" >&2; exit 2; }
 command -v cosign >/dev/null 2>&1 || { echo "cosign is required for full verification" >&2; exit 2; }
 command -v docker >/dev/null 2>&1 || { echo "docker with buildx is required for full verification" >&2; exit 2; }
+
+cosign verify-blob \
+  --bundle "$bundle" \
+  --certificate-oidc-issuer "$evidence_issuer" \
+  --certificate-identity "$evidence_identity" \
+  "$evidence" >/dev/null
+
+echo "M1.19 keyless release evidence signature verified."
 
 repo=ghcr.io/ploos-as/gamja
 immutable_ref="$repo@$digest"
@@ -100,4 +117,4 @@ jq -e 'length > 0' "$cosign_file" >/dev/null || { echo "Cosign signature verific
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 "$script_dir/verify-attestations.sh" "$immutable_ref"
 
-echo "Release $tag fully verified: checksum, identity, OCI revision, signature, SPDX SBOM, BuildKit SLSA provenance, and recorded amd64/arm64 runtime qualification."
+echo "Release $tag fully verified: signed evidence, checksum, identity, OCI revision, image signature, SPDX SBOM, BuildKit SLSA provenance, and recorded amd64/arm64 runtime qualification."
