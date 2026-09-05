@@ -36,9 +36,9 @@ grep -Eq '^[0-9a-f]{64}  release-index\.json$' "$checksum" || {
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ -n "$root" ]; then
-  "$script_dir/verify-release-index.sh" "$index" "$root" >/dev/null
+  sh "$script_dir/verify-release-index.sh" "$index" "$root" >/dev/null
 else
-  "$script_dir/verify-release-index.sh" "$index" >/dev/null
+  sh "$script_dir/verify-release-index.sh" "$index" >/dev/null
 fi
 
 issuer=${TRANSPARENCY_OIDC_ISSUER:-https://token.actions.githubusercontent.com}
