@@ -19,11 +19,12 @@ Targets and production properties:
 - SPDX SBOM plus BuildKit SLSA provenance (`mode=max`) for both platforms
 - release-blocking Trivy security qualification and daily re-scan
 - strict tag -> workflow commit -> OCI revision release-integrity gate
-- M1.11 keyless Cosign signatures bound to the GitHub Actions OIDC workflow identity
-- M1.13 digest-bound SBOM/provenance verification before release creation
-- M1.14 deterministic release evidence JSON plus SHA-256 checksum attached to releases
-- M1.15 one-command consumer release verification, enforced before and after publication
-- M1.16 digest-bound release runtime execution before GitHub Release creation
+- keyless Cosign image signatures bound to the GitHub Actions OIDC workflow identity
+- digest-bound SBOM/provenance verification before release creation
+- exact-digest runtime qualification on amd64 and arm64 before release creation
+- deterministic runtime-bound release evidence plus SHA-256 checksum
+- keyless Cosign signature over the exact release-evidence JSON
+- post-publication M1.20 release audit for Git tag, GitHub Release asset set, signed evidence and immutable OCI state
 - runtime Gamja configuration through environment variables
 - qualified HTTPS/WSS reverse proxies, production Compose and Podman Quadlet deployments
 
@@ -129,29 +130,40 @@ M1.11 signs every published OCI digest with Cosign keyless signing using the sho
 
 M1.13 validates the published SPDX SBOM and BuildKit SLSA provenance for both linux/amd64 and linux/arm64 against the immutable OCI digest. The same verifier is enforced by the release workflow before GitHub Release creation. See `ATTESTATIONS.md`.
 
-M1.14 emits deterministic `release-evidence.json` only after the release signature and attestations have passed, checksums it, and attaches both evidence files to the GitHub Release.
+M1.14-M1.18 add deterministic release evidence, canonical consumer verification and exact-digest runtime qualification on both supported architectures. M1.19 keylessly signs the exact evidence JSON with the `release.yml` GitHub Actions OIDC identity. See `RELEASE-EVIDENCE.md` and `RELEASE-RUNTIME.md`.
 
-M1.15 adds `scripts/verify-release.sh`, which validates the evidence checksum and semantics, OCI revision, exact tag-scoped Cosign identity, and both platform attestations. The release workflow must pass this consumer verifier before publication, and `release-verification` repeats it independently against the published release assets. See `RELEASE-EVIDENCE.md`.
-
-M1.16 adds `scripts/qualify-release-runtime.sh`. It rejects mutable image references and runs the exact OCI digest as UID 101 with a read-only root filesystem and `no-new-privileges`, requires a healthy state, checks the generated Gamja config, and performs a real `/socket` WebSocket upgrade to an immutably pinned soju image. The same gate runs continuously on the exact newly published `main` digest and blocks GitHub Release creation for version tags. See `RELEASE-RUNTIME.md`.
+M1.20 adds `scripts/audit-release.sh` and turns `release-verification` into a post-publication audit. It requires a non-draft GitHub Release, the exact three signed-evidence assets, tag/evidence commit equality, and then repeats the complete evidence-signature, OCI-signature and attestation consumer path. The audit runs on publication, manually, and weekly for the newest M1.20-compatible release. See `RELEASE-AUDIT.md`.
 
 ## CI qualification
 
-CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless signatures, digest-bound SBOM/provenance attestation verification, deterministic release-evidence generation, tamper rejection, the consumer release-verification path, and exact-digest M1.16 release runtime execution.
+CI covers runtime/non-root/read-only health, generated configuration, real Gamja-to-soju WebSocket upgrades, Caddy/nginx HTTPS/WSS, production Compose and Quadlet runtime behavior, crash recovery, backup/restore, security scanning, release integrity, upstream/dependency drift, amd64/arm64 OCI manifests, keyless image signatures, digest-bound SBOM/provenance verification, deterministic runtime-bound release evidence, keyless evidence signatures, tamper rejection, exact-digest two-platform release runtime execution, and M1.20 post-publication release auditing.
 
 ## Releases
 
 Release tags use an OCI-compatible SemVer subset such as `v0.2.0` or `v0.2.0-rc.1`. Build metadata (`+...`) is rejected because it cannot map losslessly to an OCI tag. Stable tags publish full version plus major/minor aliases; `latest` is produced from qualified `main`.
 
-Each new release carries `release-evidence.json` and `release-evidence.json.sha256`, binding its tag and commit to the exact verified OCI digest. After downloading those two files, the canonical full verification command is:
+Each M1.19+ release carries:
+
+- `release-evidence.json`
+- `release-evidence.json.sha256`
+- `release-evidence.bundle.json`
+
+The canonical consumer verification command is:
 
 ```sh
-./scripts/verify-release.sh release-evidence.json release-evidence.json.sha256
+./scripts/verify-release.sh \
+  release-evidence.json \
+  release-evidence.json.sha256 \
+  release-evidence.bundle.json
 ```
 
-Before the GitHub Release is created, that same exact digest must also pass M1.16 runtime qualification.
+For a published M1.20+ release, audit the full GitHub Release envelope with:
 
-Published release tags are immutable. The complete release procedure is in `RELEASE.md`; signature verification is documented in `SIGNING.md`, attestation verification in `ATTESTATIONS.md`, evidence plus consumer verification in `RELEASE-EVIDENCE.md`, and exact-digest runtime qualification in `RELEASE-RUNTIME.md`.
+```sh
+./scripts/audit-release.sh v0.2.0
+```
+
+Published release tags are immutable. The complete procedure is in `RELEASE.md`; signing is documented in `SIGNING.md`, attestations in `ATTESTATIONS.md`, evidence in `RELEASE-EVIDENCE.md`, runtime qualification in `RELEASE-RUNTIME.md`, and post-publication auditing in `RELEASE-AUDIT.md`.
 
 ## License and upstream
 
