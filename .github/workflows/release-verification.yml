@@ -6,9 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to verify
-        required: true
+        description: Existing M1.20+ release tag to audit; blank selects latest eligible release
+        required: false
         type: string
+  schedule:
+    - cron: '17 6 * * 1'
 
 permissions:
   contents: read
@@ -17,63 +19,77 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    env:
-      TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
     steps:
-      - name: Resolve release tag
+      - name: Select release to audit
         id: meta
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$TAG"
-          printf '%s' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
-        with:
-          ref: ${{ steps.meta.outputs.tag }}
-
-      - name: Download release evidence assets
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+          INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/gamja-release
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'release-evidence.json' \
-            --pattern 'release-evidence.json.sha256' \
-            --pattern 'release-evidence.bundle.json' \
-            --dir /tmp/gamja-release
-          test -s /tmp/gamja-release/release-evidence.json
-          test -s /tmp/gamja-release/release-evidence.json.sha256
-          test -s /tmp/gamja-release/release-evidence.bundle.json
+          tag="$EVENT_TAG"
+          if [[ -z "$tag" ]]; then
+            tag="$INPUT_TAG"
+          fi
+
+          if [[ -z "$tag" ]]; then
+            while IFS= read -r candidate; do
+              [[ -n "$candidate" ]] || continue
+              metadata="$(gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)"
+              if jq -e '.isDraft == false and any(.assets[]?; .name == "release-evidence.bundle.json")' <<<"$metadata" >/dev/null; then
+                tag="$candidate"
+                break
+              fi
+            done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+          fi
+
+          if [[ -z "$tag" ]]; then
+            echo 'No M1.20-compatible release with signed evidence exists yet.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'eligible=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+        if: steps.meta.outputs.eligible == 'true'
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+          fetch-depth: 0
 
       - name: Install Cosign
+        if: steps.meta.outputs.eligible == 'true'
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
 
-      - name: Verify published release as a consumer
+      - name: Audit published release
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x ./scripts/verify-release.sh ./scripts/verify-attestations.sh
-          ./scripts/verify-release.sh \
-            /tmp/gamja-release/release-evidence.json \
-            /tmp/gamja-release/release-evidence.json.sha256 \
-            /tmp/gamja-release/release-evidence.bundle.json
+          chmod +x ./scripts/audit-release.sh ./scripts/verify-release.sh ./scripts/verify-attestations.sh ./scripts/validate-release-tag.sh
+          ./scripts/audit-release.sh "$TAG"
 
-      - name: Record M1.19 verification
+      - name: Record M1.20 audit
+        if: steps.meta.outputs.eligible == 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           {
-            echo "### M1.19 published release verification"
+            echo "### M1.20 post-release audit"
             echo
             echo "- release: $TAG"
-            echo "- evidence checksum: verified"
-            echo "- evidence keyless signature: verified against release.yml@refs/heads/main"
-            echo "- exact OCI revision: verified"
-            echo "- Cosign keyless image workflow identity: verified"
-            echo "- amd64/arm64 SPDX SBOM: verified"
-            echo "- amd64/arm64 BuildKit SLSA provenance: verified"
-            echo "- recorded amd64/arm64 runtime qualification: verified"
+            echo "- GitHub Release is non-draft and tag identity matches"
+            echo "- uploaded release asset set is exactly the three signed-evidence assets"
+            echo "- Git tag commit equals release-evidence commit"
+            echo "- evidence checksum and M1.19 keyless signature verified"
+            echo "- exact OCI revision and image Cosign identity verified"
+            echo "- amd64/arm64 SPDX SBOM and BuildKit SLSA provenance verified"
+            echo "- recorded amd64/arm64 runtime qualification verified"
           } >> "$GITHUB_STEP_SUMMARY"
