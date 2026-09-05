@@ -45,15 +45,26 @@ jq -n \
       provenance: "BuildKit SLSA",
       platforms: ["linux/amd64", "linux/arm64"]
     },
+    runtime: {
+      platforms: ["linux/amd64", "linux/arm64"],
+      immutable_digest: true,
+      uid: 101,
+      read_only_rootfs: true,
+      no_new_privileges: true,
+      healthy: true,
+      generated_config_verified: true,
+      websocket_upgrade_verified: true
+    },
     verification: {
       tag_commit_equals_workflow_commit: true,
       oci_revision_equals_release_commit: true,
       signature_verified: true,
-      attestations_verified: true
+      attestations_verified: true,
+      runtime_verified: true
     }
   }' > "$output"
 
 jq -e \
   --arg tag "$tag" --arg version "$version" --arg image "$image" --arg digest "$digest" --arg commit "$release_commit" \
-  '.tag == $tag and .version == $version and .image == $image and .digest == $digest and .release_commit == $commit and (.platforms | length == 2) and .verification.signature_verified == true and .verification.attestations_verified == true' \
+  '.tag == $tag and .version == $version and .image == $image and .digest == $digest and .release_commit == $commit and (.platforms | length == 2) and .verification.signature_verified == true and .verification.attestations_verified == true and .verification.runtime_verified == true and .runtime.platforms == ["linux/amd64","linux/arm64"]' \
   "$output" >/dev/null
