@@ -77,8 +77,7 @@ jobs:
           chmod +x ./scripts/audit-release.sh ./scripts/create-audit-record.sh ./scripts/verify-release.sh ./scripts/verify-attestations.sh ./scripts/validate-release-tag.sh
           ./scripts/audit-release.sh "$TAG"
           test -s "$AUDIT_RECORD_OUT"
-          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
-          sha256sum -c /tmp/release-audit.json.sha256
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256 && sha256sum -c release-audit.json.sha256)
           jq -e --arg tag "$TAG" '.milestone == "M1.21" and .release.tag == $tag and (.verification | to_entries | all(.value == true))' "$AUDIT_RECORD_OUT" >/dev/null
 
       - name: Archive M1.21 audit record
