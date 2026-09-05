@@ -1,9 +1,15 @@
 #!/bin/sh
 set -eu
 
+mode=full
+if [ "${1:-}" = "--metadata-only" ]; then
+  mode=metadata
+  shift
+fi
+
 tag=${1:-}
 if [ -z "$tag" ]; then
-  echo "usage: $0 <release-tag>" >&2
+  echo "usage: $0 [--metadata-only] <release-tag>" >&2
   exit 2
 fi
 
@@ -63,6 +69,14 @@ evidence_commit=$(jq -r '.release_commit // empty' "$asset_dir/release-evidence.
 }
 
 chmod +x "$script_dir/verify-release.sh" "$script_dir/verify-attestations.sh"
+if [ "$mode" = metadata ]; then
+  "$script_dir/verify-release.sh" --metadata-only \
+    "$asset_dir/release-evidence.json" \
+    "$asset_dir/release-evidence.json.sha256"
+  echo "M1.20 release metadata audit passed for $tag ($tag_commit)."
+  exit 0
+fi
+
 "$script_dir/verify-release.sh" \
   "$asset_dir/release-evidence.json" \
   "$asset_dir/release-evidence.json.sha256" \
