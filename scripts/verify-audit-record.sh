@@ -3,8 +3,9 @@ set -eu
 
 record=${1:-}
 checksum=${2:-}
-if [ -z "$record" ] || [ -z "$checksum" ] || [ "${3:-}" ]; then
-  echo "usage: $0 <release-audit.json> <release-audit.json.sha256>" >&2
+bundle=${3:-}
+if [ -z "$record" ] || [ -z "$checksum" ] || [ "${4:-}" ]; then
+  echo "usage: $0 <release-audit.json> <release-audit.json.sha256> [release-audit.bundle.json]" >&2
   exit 2
 fi
 
@@ -69,3 +70,22 @@ printf 'M1.22 audit record verification passed: tag=%s commit=%s digest=%s\n' \
   "$(jq -r '.release.tag' "$record")" \
   "$(jq -r '.release.commit' "$record")" \
   "$(jq -r '.image.digest' "$record")"
+
+if [ -z "$bundle" ]; then
+  exit 0
+fi
+
+command -v cosign >/dev/null 2>&1 || { echo "cosign is required for M1.23 signed audit verification" >&2; exit 2; }
+test -s "$bundle" || { echo "missing or empty audit signature bundle: $bundle" >&2; exit 1; }
+[ "$(basename -- "$bundle")" = release-audit.bundle.json ] || { echo "audit signature bundle must be named release-audit.bundle.json" >&2; exit 1; }
+
+issuer=${AUDIT_RECORD_OIDC_ISSUER:-https://token.actions.githubusercontent.com}
+identity=${AUDIT_RECORD_IDENTITY:-https://github.com/Ploos-AS/gamja/.github/workflows/release-verification.yml@refs/heads/main}
+
+cosign verify-blob \
+  --bundle "$bundle" \
+  --certificate-oidc-issuer "$issuer" \
+  --certificate-identity "$identity" \
+  "$record" >/dev/null
+
+printf 'M1.23 keyless audit record signature verified: identity=%s\n' "$identity"
