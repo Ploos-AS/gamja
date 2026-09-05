@@ -1,0 +1,121 @@
+name: audit-signature-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: audit-signature-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      - name: Create canonical audit fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-audit-record.sh ./scripts/verify-audit-record.sh
+          export TAG=v1.2.3
+          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          export IMAGE=ghcr.io/ploos-as/gamja:1.2.3
+          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ./scripts/create-audit-record.sh /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256
+
+      - name: Keylessly sign exact M1.23 fixture bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle /tmp/release-audit.bundle.json \
+            /tmp/release-audit.json >/dev/null
+          test -s /tmp/release-audit.bundle.json
+
+      - name: Verify expected policy workflow identity
+        env:
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          ./scripts/verify-audit-record.sh \
+            /tmp/release-audit.json \
+            /tmp/release-audit.json.sha256 \
+            /tmp/release-audit.bundle.json
+
+      - name: Reject wrong workflow identity
+        env:
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/release-verification.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          if ./scripts/verify-audit-record.sh \
+            /tmp/release-audit.json \
+            /tmp/release-audit.json.sha256 \
+            /tmp/release-audit.bundle.json >/dev/null 2>&1; then
+            echo 'M1.23 accepted a bundle signed by the wrong workflow identity' >&2
+            exit 1
+          fi
+
+      - name: Reject wrong OIDC issuer
+        env:
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@refs/heads/main
+          AUDIT_RECORD_OIDC_ISSUER: https://issuer.invalid.example
+        run: |
+          set -euo pipefail
+          if ./scripts/verify-audit-record.sh \
+            /tmp/release-audit.json \
+            /tmp/release-audit.json.sha256 \
+            /tmp/release-audit.bundle.json >/dev/null 2>&1; then
+            echo 'M1.23 accepted an unexpected OIDC issuer' >&2
+            exit 1
+          fi
+
+      - name: Reject tampered signed bytes even after rechecksumming
+        env:
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cp /tmp/release-audit.json /tmp/release-audit.original.json
+          jq '.release.tag = "v1.2.4"' /tmp/release-audit.original.json > /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          if ./scripts/verify-audit-record.sh \
+            /tmp/release-audit.json \
+            /tmp/release-audit.json.sha256 \
+            /tmp/release-audit.bundle.json >/dev/null 2>&1; then
+            echo 'M1.23 accepted rechecksummed bytes not covered by the bundle signature' >&2
+            exit 1
+          fi
+
+      - name: Verify production M1.23 wiring
+        run: |
+          set -euo pipefail
+          grep -Fq 'id-token: write' .github/workflows/release-verification.yml
+          grep -Fq 'cosign sign-blob --yes' .github/workflows/release-verification.yml
+          grep -Fq '/tmp/release-audit.bundle.json' .github/workflows/release-verification.yml
+          grep -Fq 'release-verification.yml@refs/heads/main' scripts/verify-audit-record.sh
+          grep -Fq 'M1.23' RELEASE-AUDIT.md
+
+      - name: Record M1.23 policy
+        run: |
+          {
+            echo '### M1.23 signed audit-record qualification'
+            echo
+            echo '- exact deterministic audit-record bytes are keylessly signed with GitHub Actions OIDC'
+            echo '- canonical consumer verifies the Sigstore/Cosign bundle'
+            echo '- expected workflow identity is enforced'
+            echo '- expected GitHub Actions OIDC issuer is enforced'
+            echo '- rechecksummed tampered bytes are rejected by the original signature bundle'
+            echo '- production signs and verifies before immutable Actions artifact archival'
+          } >> "$GITHUB_STEP_SUMMARY"
