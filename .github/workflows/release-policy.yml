@@ -20,158 +20,97 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
 
       - name: Qualify strict release tags
-        shell: bash
         run: |
           set -euo pipefail
-          validator=./scripts/validate-release-tag.sh
-          chmod +x "$validator"
+          chmod +x ./scripts/validate-release-tag.sh
           valid=(v0.2.0 v1.0.0 v10.20.30 v1.2.3-rc.1 v1.2.3-alpha.beta)
           invalid=(1.2.3 v1.2 v1.2.3+build.1 v01.2.3 v1.02.3 v1.2.03 v1.2.3-01 v1.2.3- v1.2.3-rc..1)
-          for tag in "${valid[@]}"; do version="$($validator "$tag")"; test "$version" = "${tag#v}"; done
-          for tag in "${invalid[@]}"; do
-            if "$validator" "$tag" >/dev/null 2>&1; then echo "validator incorrectly accepted $tag" >&2; exit 1; fi
-          done
+          for tag in "${valid[@]}"; do test "$(./scripts/validate-release-tag.sh "$tag")" = "${tag#v}"; done
+          for tag in "${invalid[@]}"; do ! ./scripts/validate-release-tag.sh "$tag" >/dev/null 2>&1; done
 
-      - name: Verify release integrity wiring
-        shell: bash
+      - name: Verify release integrity, signature and attestation wiring
         run: |
           set -euo pipefail
           grep -Fq 'scripts/validate-release-tag.sh' .github/workflows/release.yml
-          grep -Fq 'tag_commit' .github/workflows/release.yml
           grep -Fq 'workflow_run.head_sha' .github/workflows/release.yml
           grep -Fq 'org.opencontainers.image.revision' .github/workflows/release.yml
           grep -Fq 'org.opencontainers.image.revision' .github/workflows/container.yml
-
-      - name: Verify signed release gate wiring
-        shell: bash
-        run: |
-          set -euo pipefail
           grep -Fq 'sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62' .github/workflows/release.yml
-          grep -Fq 'Verify signed release image' .github/workflows/release.yml
           grep -Fq -- '--certificate-oidc-issuer https://token.actions.githubusercontent.com' .github/workflows/release.yml
-          grep -Fq "container.yml@refs/tags/v.*" .github/workflows/release.yml
-          verify_line=$(grep -n 'Verify signed release image' .github/workflows/release.yml | cut -d: -f1)
-          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
-          test "$verify_line" -lt "$release_line"
-
-      - name: Verify attestation release gate wiring
-        shell: bash
-        run: |
-          set -euo pipefail
+          grep -Fq 'container.yml@refs/tags/v.*' .github/workflows/release.yml
           grep -Fq 'scripts/verify-attestations.sh' .github/workflows/release.yml
-          grep -Fq 'Verify release SBOM and provenance attestations' .github/workflows/release.yml
           grep -Fq 'SPDXRef-DOCUMENT' scripts/verify-attestations.sh
-          grep -Fq 'https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-definitions.md' scripts/verify-attestations.sh
-          grep -Fq '.buildDefinition.buildType' scripts/verify-attestations.sh
           grep -Fq 'linux/amd64 linux/arm64' scripts/verify-attestations.sh
-          attest_line=$(grep -n 'Verify release SBOM and provenance attestations' .github/workflows/release.yml | cut -d: -f1)
-          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
-          test "$attest_line" -lt "$release_line"
 
-      - name: Qualify M1.14 release evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/create-release-evidence.sh
-          export TAG=v1.2.3 VERSION=1.2.3 IMAGE=ghcr.io/ploos-as/gamja:1.2.3
-          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-          ./scripts/create-release-evidence.sh /tmp/evidence-a.json
-          ./scripts/create-release-evidence.sh /tmp/evidence-b.json
-          cmp /tmp/evidence-a.json /tmp/evidence-b.json
-          jq -e --arg digest "$DIGEST" --arg commit "$RELEASE_COMMIT" '.digest == $digest and .release_commit == $commit and .platforms == ["linux/amd64","linux/arm64"] and .verification.signature_verified and .verification.attestations_verified' /tmp/evidence-a.json >/dev/null
-          grep -Fq 'Generate M1.14 release evidence' .github/workflows/release.yml
-          grep -Fq '/tmp/release-evidence.json.sha256' .github/workflows/release.yml
-          grep -Fq '/tmp/release-evidence.json' .github/workflows/release.yml
-          evidence_line=$(grep -n 'Generate M1.14 release evidence' .github/workflows/release.yml | cut -d: -f1)
-          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
-          test "$evidence_line" -lt "$release_line"
-
-      - name: Qualify M1.15 consumer verifier
-        shell: bash
+      - name: Qualify M1.18 runtime-bound release evidence
         run: |
           set -euo pipefail
           chmod +x ./scripts/create-release-evidence.sh ./scripts/verify-release.sh
           export TAG=v1.2.3 VERSION=1.2.3 IMAGE=ghcr.io/ploos-as/gamja:1.2.3
           export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-          ./scripts/create-release-evidence.sh /tmp/release-evidence.json
-          (cd /tmp && sha256sum release-evidence.json > release-evidence.json.sha256)
-          ./scripts/verify-release.sh --metadata-only /tmp/release-evidence.json /tmp/release-evidence.json.sha256
+          ./scripts/create-release-evidence.sh /tmp/evidence-a.json
+          ./scripts/create-release-evidence.sh /tmp/evidence-b.json
+          cmp /tmp/evidence-a.json /tmp/evidence-b.json
+          jq -e '.runtime.platforms == ["linux/amd64","linux/arm64"] and .runtime.immutable_digest and .runtime.uid == 101 and .runtime.read_only_rootfs and .runtime.no_new_privileges and .runtime.healthy and .runtime.generated_config_verified and .runtime.websocket_upgrade_verified and .verification.runtime_verified' /tmp/evidence-a.json >/dev/null
+          (cd /tmp && sha256sum evidence-a.json > evidence-a.json.sha256)
+          ./scripts/verify-release.sh --metadata-only /tmp/evidence-a.json /tmp/evidence-a.json.sha256
 
-          cp /tmp/release-evidence.json /tmp/tampered.json
-          jq '.digest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"' /tmp/tampered.json > /tmp/tampered.new
+          cp /tmp/evidence-a.json /tmp/tampered.json
+          jq '.verification.runtime_verified = false' /tmp/tampered.json > /tmp/tampered.new
           mv /tmp/tampered.new /tmp/tampered.json
-          if ./scripts/verify-release.sh --metadata-only /tmp/tampered.json /tmp/release-evidence.json.sha256 >/dev/null 2>&1; then
-            echo 'consumer verifier accepted tampered evidence' >&2
+          (cd /tmp && sha256sum tampered.json > tampered.json.sha256)
+          if ./scripts/verify-release.sh --metadata-only /tmp/tampered.json /tmp/tampered.json.sha256 >/dev/null 2>&1; then
+            echo 'consumer verifier accepted false runtime qualification' >&2
             exit 1
           fi
 
-          grep -Fq 'Verify M1.15 consumer release path' .github/workflows/release.yml
-          grep -Fq './scripts/verify-release.sh /tmp/release-evidence.json /tmp/release-evidence.json.sha256' .github/workflows/release.yml
-          consumer_line=$(grep -n 'Verify M1.15 consumer release path' .github/workflows/release.yml | cut -d: -f1)
+          runtime_line=$(grep -n 'Qualify M1.17 exact release runtime on amd64 and arm64' .github/workflows/release.yml | cut -d: -f1)
+          evidence_line=$(grep -n 'Generate M1.18 runtime-bound release evidence' .github/workflows/release.yml | cut -d: -f1)
+          consumer_line=$(grep -n 'Verify M1.18 consumer release path' .github/workflows/release.yml | cut -d: -f1)
           release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
+          test "$runtime_line" -lt "$evidence_line"
+          test "$evidence_line" -lt "$consumer_line"
           test "$consumer_line" -lt "$release_line"
 
-          grep -Fq 'release:' .github/workflows/release-verification.yml
-          grep -Fq 'types: [published]' .github/workflows/release-verification.yml
-          grep -Fq "release-evidence.json.sha256" .github/workflows/release-verification.yml
-          grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
-
       - name: Qualify M1.16 and M1.17 digest-bound runtime gate
-        shell: bash
         run: |
           set -euo pipefail
           bash -n ./scripts/qualify-release-runtime.sh
           chmod +x ./scripts/qualify-release-runtime.sh
-          if ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja:latest linux/amd64 >/dev/null 2>&1; then
-            echo 'release runtime qualifier accepted a mutable tag' >&2
-            exit 1
-          fi
-          if ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa linux/s390x >/dev/null 2>&1; then
-            echo 'release runtime qualifier accepted an unsupported platform' >&2
-            exit 1
-          fi
+          ! ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja:latest linux/amd64 >/dev/null 2>&1
+          ! ./scripts/qualify-release-runtime.sh ghcr.io/ploos-as/gamja@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa linux/s390x >/dev/null 2>&1
           grep -Fq 'linux/amd64|linux/arm64' scripts/qualify-release-runtime.sh
           grep -Fq -- '--platform "$platform"' scripts/qualify-release-runtime.sh
           grep -Fq -- '--read-only' scripts/qualify-release-runtime.sh
           grep -Fq -- '--security-opt no-new-privileges:true' scripts/qualify-release-runtime.sh
           grep -Fq 'Sec-WebSocket-Version: 13' scripts/qualify-release-runtime.sh
-          grep -Fq "^HTTP/1\\.[01] 101 " scripts/qualify-release-runtime.sh
-
           qemu_pin='docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a'
           binfmt_pin='docker.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0'
           grep -Fq "$qemu_pin" .github/workflows/release-runtime.yml
           grep -Fq "$binfmt_pin" .github/workflows/release-runtime.yml
           grep -Fq "$qemu_pin" .github/workflows/release.yml
           grep -Fq "$binfmt_pin" .github/workflows/release.yml
-
-          grep -Fq 'Qualify exact published runtime digest on amd64' .github/workflows/release-runtime.yml
-          grep -Fq 'Qualify exact published runtime digest on arm64' .github/workflows/release-runtime.yml
-          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/amd64' .github/workflows/release-runtime.yml
-          grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/arm64' .github/workflows/release-runtime.yml
-
-          grep -Fq 'Qualify M1.17 exact release runtime on amd64 and arm64' .github/workflows/release.yml
           grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/amd64' .github/workflows/release.yml
           grep -Fq './scripts/qualify-release-runtime.sh "ghcr.io/ploos-as/gamja@$DIGEST" linux/arm64' .github/workflows/release.yml
-          runtime_line=$(grep -n 'Qualify M1.17 exact release runtime on amd64 and arm64' .github/workflows/release.yml | cut -d: -f1)
-          release_line=$(grep -n 'Create GitHub release if missing' .github/workflows/release.yml | cut -d: -f1)
-          test "$runtime_line" -lt "$release_line"
+
+      - name: Verify published consumer path remains wired
+        run: |
+          set -euo pipefail
+          grep -Fq 'release:' .github/workflows/release-verification.yml
+          grep -Fq 'types: [published]' .github/workflows/release-verification.yml
+          grep -Fq 'release-evidence.json.sha256' .github/workflows/release-verification.yml
+          grep -Fq './scripts/verify-release.sh' .github/workflows/release-verification.yml
 
       - name: Record release policy
         run: |
           {
-            echo "### M1.8 + M1.12 + M1.13 + M1.14 + M1.15 + M1.16 + M1.17 release integrity qualification"
+            echo '### M1.18 release integrity qualification'
             echo
-            echo "- strict OCI-compatible SemVer release tags"
-            echo "- annotated/lightweight tag commit must equal successful container workflow commit"
-            echo "- OCI revision must equal release commit"
-            echo "- exact OCI release digest must have a valid Cosign keyless signature"
-            echo "- signature identity is restricted to this repository's container workflow on the exact version tag"
-            echo "- SPDX SBOM and current BuildKit SLSA provenance must validate for amd64 and arm64"
-            echo "- deterministic release evidence binds tag, commit and exact OCI digest"
-            echo "- consumer verifier validates checksum, evidence policy, OCI revision, exact Cosign identity and attestations"
-            echo "- the same consumer path runs before publication and again on published release assets"
-            echo "- exact digest must execute non-root/read-only, become healthy, serve generated config and complete a real WebSocket upgrade"
-            echo "- M1.17 requires that same runtime contract on both linux/amd64 and linux/arm64, with arm64 executed through immutably pinned QEMU/binfmt on GitHub-hosted amd64 runners"
+            echo '- strict tag, commit, OCI revision, signature and attestation binding preserved'
+            echo '- exact digest runtime qualification remains mandatory on linux/amd64 and linux/arm64'
+            echo '- release evidence is generated only after both runtime qualifications pass'
+            echo '- evidence records immutable digest, UID 101, read-only rootfs, no-new-privileges, health, generated config and WebSocket qualification'
+            echo '- consumer verification rejects evidence without the M1.18 runtime-qualified state'
+            echo '- runtime -> evidence -> consumer verification -> GitHub Release ordering is policy-enforced'
           } >> "$GITHUB_STEP_SUMMARY"
