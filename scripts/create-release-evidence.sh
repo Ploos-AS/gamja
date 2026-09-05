@@ -40,6 +40,11 @@ jq -n \
       oidc_issuer: "https://token.actions.githubusercontent.com",
       workflow_identity: ("https://github.com/Ploos-AS/gamja/.github/workflows/container.yml@refs/tags/" + $tag)
     },
+    evidence_signature: {
+      scheme: "cosign-keyless-blob",
+      oidc_issuer: "https://token.actions.githubusercontent.com",
+      workflow_identity: "https://github.com/Ploos-AS/gamja/.github/workflows/release.yml@refs/heads/main"
+    },
     attestations: {
       sbom: "SPDX",
       provenance: "BuildKit SLSA",
@@ -66,5 +71,5 @@ jq -n \
 
 jq -e \
   --arg tag "$tag" --arg version "$version" --arg image "$image" --arg digest "$digest" --arg commit "$release_commit" \
-  '.tag == $tag and .version == $version and .image == $image and .digest == $digest and .release_commit == $commit and (.platforms | length == 2) and .verification.signature_verified == true and .verification.attestations_verified == true and .verification.runtime_verified == true and .runtime.platforms == ["linux/amd64","linux/arm64"]' \
+  '.tag == $tag and .version == $version and .image == $image and .digest == $digest and .release_commit == $commit and (.platforms | length == 2) and .signature.scheme == "cosign-keyless" and .evidence_signature.scheme == "cosign-keyless-blob" and .verification.signature_verified == true and .verification.attestations_verified == true and .verification.runtime_verified == true and .runtime.platforms == ["linux/amd64","linux/arm64"]' \
   "$output" >/dev/null
