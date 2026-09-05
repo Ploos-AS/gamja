@@ -62,7 +62,11 @@ find "$root" -mindepth 2 -maxdepth 2 -type f -name release-evidence.json -print 
   printf '%s' "$evidence_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo "invalid image digest for $tag" >&2; exit 1; }
 
   evidence_sha=$(sha256sum "$evidence" | awk '{print $1}')
+  evidence_sum_sha=$(sha256sum "$evidence_sum" | awk '{print $1}')
+  evidence_bundle_sha=$(sha256sum "$evidence_bundle" | awk '{print $1}')
   audit_sha=$(sha256sum "$audit" | awk '{print $1}')
+  audit_sum_sha=$(sha256sum "$audit_sum" | awk '{print $1}')
+  audit_bundle_sha=$(sha256sum "$audit_bundle" | awk '{print $1}')
 
   jq -cn \
     --arg tag "$tag" \
@@ -70,23 +74,25 @@ find "$root" -mindepth 2 -maxdepth 2 -type f -name release-evidence.json -print 
     --arg image "$evidence_image" \
     --arg digest "$evidence_digest" \
     --arg evidence_sha "$evidence_sha" \
+    --arg evidence_sum_sha "$evidence_sum_sha" \
+    --arg evidence_bundle_sha "$evidence_bundle_sha" \
     --arg audit_sha "$audit_sha" \
+    --arg audit_sum_sha "$audit_sum_sha" \
+    --arg audit_bundle_sha "$audit_bundle_sha" \
     '{
       tag: $tag,
       release_commit: $commit,
       image: $image,
       digest: $digest,
       evidence: {
-        json: "release-evidence.json",
-        checksum: "release-evidence.json.sha256",
-        bundle: "release-evidence.bundle.json",
-        sha256: $evidence_sha
+        json: {name: "release-evidence.json", sha256: $evidence_sha},
+        checksum: {name: "release-evidence.json.sha256", sha256: $evidence_sum_sha},
+        bundle: {name: "release-evidence.bundle.json", sha256: $evidence_bundle_sha}
       },
       audit: {
-        json: "release-audit.json",
-        checksum: "release-audit.json.sha256",
-        bundle: "release-audit.bundle.json",
-        sha256: $audit_sha
+        json: {name: "release-audit.json", sha256: $audit_sha},
+        checksum: {name: "release-audit.json.sha256", sha256: $audit_sum_sha},
+        bundle: {name: "release-audit.bundle.json", sha256: $audit_bundle_sha}
       }
     }' >> "$entries"
 done
