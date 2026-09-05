@@ -1,0 +1,57 @@
+name: release-verification-chain-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-verification-chain-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Qualify M1.29 automatic post-release chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=.github/workflows/release-verification.yml
+
+          grep -Fq 'workflow_run:' "$file"
+          grep -Fq 'workflows: [release]' "$file"
+          grep -Fq 'types: [completed]' "$file"
+          grep -Fq "github.event.workflow_run.conclusion == 'success'" "$file"
+          grep -Fq "github.event.workflow_run.head_sha" "$file"
+          grep -Fq 'release-evidence.json' "$file"
+          grep -Fq '.release_commit == $commit' "$file"
+          grep -Fq 'No published release evidence is bound to release workflow commit' "$file"
+
+          # Existing independent fallbacks remain available.
+          grep -Fq 'release:' "$file"
+          grep -Fq 'types: [published]' "$file"
+          grep -Fq 'workflow_dispatch:' "$file"
+          grep -Fq "cron: '17 6 * * 1'" "$file"
+
+          # The release producer remains container-tag driven.
+          grep -Fq 'workflows: [container]' .github/workflows/release.yml
+          grep -Fq "startsWith(github.event.workflow_run.head_branch, 'v')" .github/workflows/release.yml
+          grep -Fq 'Create GitHub release if missing' .github/workflows/release.yml
+
+      - name: Record M1.29 policy
+        run: |
+          {
+            echo '### M1.29 automatic release-verification chain'
+            echo
+            echo '- successful release workflow runs automatically trigger release-verification'
+            echo '- release-verification binds the selected GitHub Release to the producer head SHA through release-evidence.json'
+            echo '- workflow-run selection fails closed if no published evidence matches the producer commit'
+            echo '- release, manual dispatch and weekly schedule triggers remain as independent fallbacks'
+          } >> "$GITHUB_STEP_SUMMARY"
