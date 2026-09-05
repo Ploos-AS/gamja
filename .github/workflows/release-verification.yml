@@ -44,9 +44,11 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --pattern 'release-evidence.json' \
             --pattern 'release-evidence.json.sha256' \
+            --pattern 'release-evidence.bundle.json' \
             --dir /tmp/gamja-release
           test -s /tmp/gamja-release/release-evidence.json
           test -s /tmp/gamja-release/release-evidence.json.sha256
+          test -s /tmp/gamja-release/release-evidence.bundle.json
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
@@ -58,17 +60,20 @@ jobs:
           chmod +x ./scripts/verify-release.sh ./scripts/verify-attestations.sh
           ./scripts/verify-release.sh \
             /tmp/gamja-release/release-evidence.json \
-            /tmp/gamja-release/release-evidence.json.sha256
+            /tmp/gamja-release/release-evidence.json.sha256 \
+            /tmp/gamja-release/release-evidence.bundle.json
 
-      - name: Record M1.15 verification
+      - name: Record M1.19 verification
         run: |
           {
-            echo "### M1.15 published release verification"
+            echo "### M1.19 published release verification"
             echo
             echo "- release: $TAG"
             echo "- evidence checksum: verified"
+            echo "- evidence keyless signature: verified against release.yml@refs/heads/main"
             echo "- exact OCI revision: verified"
-            echo "- Cosign keyless workflow identity: verified"
+            echo "- Cosign keyless image workflow identity: verified"
             echo "- amd64/arm64 SPDX SBOM: verified"
             echo "- amd64/arm64 BuildKit SLSA provenance: verified"
+            echo "- recorded amd64/arm64 runtime qualification: verified"
           } >> "$GITHUB_STEP_SUMMARY"
