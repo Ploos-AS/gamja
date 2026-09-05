@@ -59,6 +59,19 @@ if [ -n "$root" ]; then
 $entry
 EOF
 )
+    index_commit=$(jq -r '.release_commit' <<EOF
+$entry
+EOF
+)
+    index_image=$(jq -r '.image' <<EOF
+$entry
+EOF
+)
+    index_digest=$(jq -r '.digest' <<EOF
+$entry
+EOF
+)
+
     dir="$root/$tag"
     [ -d "$dir" ] || { echo "indexed release directory missing: $tag" >&2; exit 1; }
 
@@ -91,11 +104,23 @@ EOF
 
     evidence="$dir/release-evidence.json"
     audit="$dir/release-audit.json"
-    [ "$(jq -r '.tag' "$evidence")" = "$tag" ] || { echo "evidence tag mismatch for $tag" >&2; exit 1; }
-    [ "$(jq -r '.release.tag' "$audit")" = "$tag" ] || { echo "audit tag mismatch for $tag" >&2; exit 1; }
-    [ "$(jq -r '.release_commit' "$evidence")" = "$(jq -r '.release.commit' "$audit")" ] || { echo "commit binding mismatch for $tag" >&2; exit 1; }
-    [ "$(jq -r '.image' "$evidence")" = "$(jq -r '.image.name' "$audit")" ] || { echo "image binding mismatch for $tag" >&2; exit 1; }
-    [ "$(jq -r '.digest' "$evidence")" = "$(jq -r '.image.digest' "$audit")" ] || { echo "digest binding mismatch for $tag" >&2; exit 1; }
+    evidence_tag=$(jq -r '.tag' "$evidence")
+    evidence_commit=$(jq -r '.release_commit' "$evidence")
+    evidence_image=$(jq -r '.image' "$evidence")
+    evidence_digest=$(jq -r '.digest' "$evidence")
+    audit_tag=$(jq -r '.release.tag' "$audit")
+    audit_commit=$(jq -r '.release.commit' "$audit")
+    audit_image=$(jq -r '.image.name' "$audit")
+    audit_digest=$(jq -r '.image.digest' "$audit")
+
+    [ "$evidence_tag" = "$tag" ] || { echo "evidence tag mismatch for $tag" >&2; exit 1; }
+    [ "$audit_tag" = "$tag" ] || { echo "audit tag mismatch for $tag" >&2; exit 1; }
+    [ "$index_commit" = "$evidence_commit" ] || { echo "index/evidence commit mismatch for $tag" >&2; exit 1; }
+    [ "$index_image" = "$evidence_image" ] || { echo "index/evidence image mismatch for $tag" >&2; exit 1; }
+    [ "$index_digest" = "$evidence_digest" ] || { echo "index/evidence digest mismatch for $tag" >&2; exit 1; }
+    [ "$evidence_commit" = "$audit_commit" ] || { echo "evidence/audit commit mismatch for $tag" >&2; exit 1; }
+    [ "$evidence_image" = "$audit_image" ] || { echo "evidence/audit image mismatch for $tag" >&2; exit 1; }
+    [ "$evidence_digest" = "$audit_digest" ] || { echo "evidence/audit digest mismatch for $tag" >&2; exit 1; }
   done
 fi
 
