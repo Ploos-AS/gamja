@@ -47,7 +47,7 @@ jobs:
 
       - name: Verify expected policy workflow identity
         env:
-          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@refs/heads/main
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@${{ github.ref }}
         run: |
           set -euo pipefail
           ./scripts/verify-audit-record.sh \
@@ -70,7 +70,7 @@ jobs:
 
       - name: Reject wrong OIDC issuer
         env:
-          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@refs/heads/main
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@${{ github.ref }}
           AUDIT_RECORD_OIDC_ISSUER: https://issuer.invalid.example
         run: |
           set -euo pipefail
@@ -84,7 +84,7 @@ jobs:
 
       - name: Reject tampered signed bytes even after rechecksumming
         env:
-          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@refs/heads/main
+          AUDIT_RECORD_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/audit-signature-policy.yml@${{ github.ref }}
         run: |
           set -euo pipefail
           cp /tmp/release-audit.json /tmp/release-audit.original.json

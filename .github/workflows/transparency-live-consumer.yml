@@ -1,0 +1,108 @@
+name: transparency-live-consumer
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '11 7 * * *'
+  workflow_run:
+    workflows: ["release-transparency"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  policy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Qualify M1.27 consumer script
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/verify-live-transparency.sh
+          sh -n scripts/verify-live-transparency.sh
+          if scripts/verify-live-transparency.sh >/dev/null 2>&1; then
+            echo 'missing arguments unexpectedly accepted' >&2
+            exit 1
+          fi
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      - name: Resolve signed transparency producer run
+        if: github.event_name != 'pull_request'
+        id: producer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            run_id="$WORKFLOW_RUN_ID"
+          else
+            run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow release-transparency.yml \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo 'unable to resolve successful release-transparency run' >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download archived M1.26 signed snapshot
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCER_RUN_ID: ${{ steps.producer.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/transparency-snapshot
+          gh run download "$PRODUCER_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "release-transparency-$PRODUCER_RUN_ID" \
+            --dir /tmp/transparency-snapshot
+          test -s /tmp/transparency-snapshot/release-index.json
+          test -s /tmp/transparency-snapshot/release-index.json.sha256
+          test -s /tmp/transparency-snapshot/release-index.bundle.json
+
+      - name: Verify M1.27 signed snapshot against current live releases
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/release-transparency.yml@refs/heads/main
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/verify-live-transparency.sh \
+            /tmp/transparency-snapshot/release-index.json \
+            /tmp/transparency-snapshot/release-index.json.sha256 \
+            /tmp/transparency-snapshot/release-index.bundle.json
+
+      - name: Record M1.27 qualification
+        shell: bash
+        run: |
+          {
+            echo '### M1.27 independent live transparency consumer'
+            echo
+            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+              echo '- canonical consumer syntax and fail-closed argument handling qualified'
+              echo '- production snapshot verification is intentionally not performed from pull-request code'
+            else
+              echo '- archived M1.26 snapshot downloaded from a successful release-transparency producer run'
+              echo '- checksum, closed M1.25 schema and exact GitHub OIDC signature identity verified'
+              echo '- current GitHub Release assets independently reconstructed into a fresh transparency index'
+              echo '- signed snapshot and fresh live reconstruction required to be byte-identical'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

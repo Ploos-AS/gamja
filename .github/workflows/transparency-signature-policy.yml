@@ -53,7 +53,7 @@ jobs:
 
       - name: Verify expected policy workflow identity
         env:
-          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/transparency-signature-policy.yml@refs/heads/main
+          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/transparency-signature-policy.yml@${{ github.ref }}
         run: |
           set -euo pipefail
           scripts/verify-transparency-snapshot.sh \
@@ -78,7 +78,7 @@ jobs:
 
       - name: Reject wrong OIDC issuer
         env:
-          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/transparency-signature-policy.yml@refs/heads/main
+          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/transparency-signature-policy.yml@${{ github.ref }}
           TRANSPARENCY_OIDC_ISSUER: https://issuer.invalid.example
         run: |
           set -euo pipefail
@@ -93,7 +93,7 @@ jobs:
 
       - name: Reject tampered signed bytes after rechecksumming
         env:
-          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/transparency-signature-policy.yml@refs/heads/main
+          TRANSPARENCY_IDENTITY: https://github.com/Ploos-AS/gamja/.github/workflows/transparency-signature-policy.yml@${{ github.ref }}
         run: |
           set -euo pipefail
           cp /tmp/release-index.json /tmp/release-index.original.json
