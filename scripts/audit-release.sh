@@ -32,15 +32,26 @@ jq -e --arg tag "$tag" '.tagName == $tag and .isDraft == false' "$release_json" 
   exit 1
 }
 
+# M1.20 releases begin with the exact signed-evidence triplet. M1.24 may then
+# append exactly the signed audit triplet for durable retention. No other asset
+# shape is accepted, and every present asset must remain non-empty.
 jq -e '
-  ([.assets[].name] | sort) == [
+  (([.assets[].name] | sort) == [
     "release-evidence.bundle.json",
     "release-evidence.json",
     "release-evidence.json.sha256"
-  ] and
+  ] or
+  ([.assets[].name] | sort) == [
+    "release-audit.bundle.json",
+    "release-audit.json",
+    "release-audit.json.sha256",
+    "release-evidence.bundle.json",
+    "release-evidence.json",
+    "release-evidence.json.sha256"
+  ]) and
   all(.assets[]; (.size // 0) > 0)
 ' "$release_json" >/dev/null || {
-  echo "release asset set is not the exact M1.20 evidence bundle" >&2
+  echo "release asset set is not the exact M1.20/M1.24 evidence contract" >&2
   exit 1
 }
 
@@ -73,7 +84,7 @@ if [ "$mode" = metadata ]; then
   "$script_dir/verify-release.sh" --metadata-only \
     "$asset_dir/release-evidence.json" \
     "$asset_dir/release-evidence.json.sha256"
-  echo "M1.20 release metadata audit passed for $tag ($tag_commit)."
+  echo "M1.20/M1.24 release metadata audit passed for $tag ($tag_commit)."
   exit 0
 fi
 
