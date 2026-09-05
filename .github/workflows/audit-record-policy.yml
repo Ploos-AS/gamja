@@ -31,8 +31,7 @@ jobs:
           ./scripts/create-audit-record.sh /tmp/audit-b.json
           cmp /tmp/audit-a.json /tmp/audit-b.json
           jq -e '.milestone == "M1.21" and .release.tag == "v1.2.3" and .release.commit == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" and .image.digest == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" and (.verification | to_entries | all(.value == true))' /tmp/audit-a.json >/dev/null
-          (cd /tmp && sha256sum audit-a.json > audit-a.json.sha256)
-          sha256sum -c /tmp/audit-a.json.sha256
+          (cd /tmp && sha256sum audit-a.json > audit-a.json.sha256 && sha256sum -c audit-a.json.sha256)
 
           if TAG=v1.2.3 RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb IMAGE=ghcr.io/ploos-as/gamja:1.2.3 DIGEST=sha256:bad ./scripts/create-audit-record.sh /tmp/bad.json >/dev/null 2>&1; then
             echo 'audit record generator accepted invalid digest' >&2
@@ -53,7 +52,6 @@ jobs:
       - name: Verify upload-artifact pin is immutable and reachable
         run: |
           set -euo pipefail
-          git ls-remote https://github.com/actions/upload-artifact.git 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a >/tmp/upload-artifact-pin
           git fetch --no-tags --depth=1 https://github.com/actions/upload-artifact.git 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
           test "$(git rev-parse FETCH_HEAD)" = 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
 
