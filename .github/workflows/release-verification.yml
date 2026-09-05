@@ -58,6 +58,11 @@ jobs:
               fi
               rm -rf "$tmp"
             done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+
+            if [[ -z "$tag" ]]; then
+              echo "No published release evidence is bound to release workflow commit $WORKFLOW_COMMIT" >&2
+              exit 1
+            fi
           fi
 
           if [[ -z "$tag" ]]; then
