@@ -1,0 +1,71 @@
+name: audit-record-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-record-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Qualify deterministic M1.21 audit record
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-audit-record.sh
+          export TAG=v1.2.3
+          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          export IMAGE=ghcr.io/ploos-as/gamja:1.2.3
+          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ./scripts/create-audit-record.sh /tmp/audit-a.json
+          ./scripts/create-audit-record.sh /tmp/audit-b.json
+          cmp /tmp/audit-a.json /tmp/audit-b.json
+          jq -e '.milestone == "M1.21" and .release.tag == "v1.2.3" and .release.commit == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" and .image.digest == "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" and (.verification | to_entries | all(.value == true))' /tmp/audit-a.json >/dev/null
+          (cd /tmp && sha256sum audit-a.json > audit-a.json.sha256)
+          sha256sum -c /tmp/audit-a.json.sha256
+
+          if TAG=v1.2.3 RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb IMAGE=ghcr.io/ploos-as/gamja:1.2.3 DIGEST=sha256:bad ./scripts/create-audit-record.sh /tmp/bad.json >/dev/null 2>&1; then
+            echo 'audit record generator accepted invalid digest' >&2
+            exit 1
+          fi
+
+      - name: Verify M1.21 archive wiring
+        run: |
+          set -euo pipefail
+          grep -Fq 'AUDIT_RECORD_OUT: /tmp/release-audit.json' .github/workflows/release-verification.yml
+          grep -Fq 'create-audit-record.sh' scripts/audit-release.sh
+          grep -Fq 'release-audit.json.sha256' .github/workflows/release-verification.yml
+          grep -Fq 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' .github/workflows/release-verification.yml
+          grep -Fq 'retention-days: 90' .github/workflows/release-verification.yml
+          grep -Fq 'artifact-digest' .github/workflows/release-verification.yml
+          grep -Fq 'compression-level: 0' .github/workflows/release-verification.yml
+
+      - name: Verify upload-artifact pin is immutable and reachable
+        run: |
+          set -euo pipefail
+          git ls-remote https://github.com/actions/upload-artifact.git 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a >/tmp/upload-artifact-pin
+          git fetch --no-tags --depth=1 https://github.com/actions/upload-artifact.git 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          test "$(git rev-parse FETCH_HEAD)" = 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+
+      - name: Record M1.21 policy
+        run: |
+          {
+            echo '### M1.21 audit record qualification'
+            echo
+            echo '- same release identity produces byte-identical audit JSON'
+            echo '- record binds release tag, commit and immutable OCI digest'
+            echo '- all M1.20 verification claims are represented as explicit booleans'
+            echo '- JSON SHA-256 is generated and checked before archival'
+            echo '- upload-artifact is pinned to an immutable Node 24 commit'
+            echo '- workflow archives the record and checksum for 90 days and records the artifact digest'
+          } >> "$GITHUB_STEP_SUMMARY"
