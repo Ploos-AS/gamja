@@ -1,6 +1,9 @@
 name: release-verification
 
 on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
   release:
     types: [published]
   workflow_dispatch:
@@ -19,6 +22,9 @@ permissions:
 
 jobs:
   verify:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     steps:
       - name: Select release to audit
@@ -27,12 +33,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
           INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+          WORKFLOW_COMMIT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
         shell: bash
         run: |
           set -euo pipefail
           tag="$EVENT_TAG"
           if [[ -z "$tag" ]]; then
             tag="$INPUT_TAG"
+          fi
+
+          if [[ -z "$tag" && -n "$WORKFLOW_COMMIT" ]]; then
+            while IFS= read -r candidate; do
+              [[ -n "$candidate" ]] || continue
+              metadata="$(gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)"
+              if ! jq -e '.isDraft == false and any(.assets[]?; .name == "release-evidence.json")' <<<"$metadata" >/dev/null; then
+                continue
+              fi
+              tmp="$(mktemp -d)"
+              if gh release download "$candidate" --repo "$GITHUB_REPOSITORY" --dir "$tmp" --pattern release-evidence.json >/dev/null 2>&1 &&
+                 jq -e --arg commit "$WORKFLOW_COMMIT" '.release_commit == $commit' "$tmp/release-evidence.json" >/dev/null 2>&1; then
+                tag="$candidate"
+                rm -rf "$tmp"
+                break
+              fi
+              rm -rf "$tmp"
+            done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
           fi
 
           if [[ -z "$tag" ]]; then
