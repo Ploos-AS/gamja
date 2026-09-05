@@ -1,0 +1,204 @@
+name: audit-retention-policy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-retention-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
+
+      - name: Create deterministic M1.24 fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/create-audit-record.sh ./scripts/verify-audit-record.sh ./scripts/retain-audit-record.sh
+          export TAG=v1.2.3
+          export RELEASE_COMMIT=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          export IMAGE=ghcr.io/ploos-as/gamja:1.2.3
+          export DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ./scripts/create-audit-record.sh /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256
+
+      - name: Install deterministic GitHub and Cosign transports
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/m124-bin /tmp/m124-release
+          printf '%s\n' base > /tmp/m124-state
+          printf '%s\n' 0 > /tmp/m124-uploads
+
+          cat > /tmp/m124-bin/cosign <<'EOF'
+          #!/bin/sh
+          set -eu
+          command=${1:-}
+          shift || true
+          case "$command" in
+            sign-blob)
+              bundle=''
+              while [ "$#" -gt 0 ]; do
+                if [ "$1" = --bundle ]; then
+                  shift
+                  bundle=$1
+                fi
+                shift || true
+              done
+              test -n "$bundle"
+              printf '%s\n' '{"fake":"m1.24-policy-bundle"}' > "$bundle"
+              ;;
+            verify-blob)
+              exit 0
+              ;;
+            *) exit 2 ;;
+          esac
+          EOF
+
+          cat > /tmp/m124-bin/gh <<'EOF'
+          #!/bin/sh
+          set -eu
+          test "${1:-}" = release
+          action=${2:-}
+          force=${M124_FORCE_STATE:-}
+          state=$(cat /tmp/m124-state)
+          [ -z "$force" ] || state=$force
+
+          metadata() {
+            case "$state" in
+              base)
+                printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"assets":[{"name":"release-evidence.bundle.json","size":3},{"name":"release-evidence.json","size":1},{"name":"release-evidence.json.sha256","size":1}]}'
+                ;;
+              full)
+                printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"assets":[{"name":"release-audit.bundle.json","size":3},{"name":"release-audit.json","size":1},{"name":"release-audit.json.sha256","size":1},{"name":"release-evidence.bundle.json","size":3},{"name":"release-evidence.json","size":1},{"name":"release-evidence.json.sha256","size":1}]}'
+                ;;
+              partial)
+                printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"assets":[{"name":"release-audit.json","size":1},{"name":"release-evidence.bundle.json","size":3},{"name":"release-evidence.json","size":1},{"name":"release-evidence.json.sha256","size":1}]}'
+                ;;
+              extra)
+                printf '%s\n' '{"tagName":"v1.2.3","isDraft":false,"assets":[{"name":"release-audit.bundle.json","size":3},{"name":"release-audit.json","size":1},{"name":"release-audit.json.sha256","size":1},{"name":"release-evidence.bundle.json","size":3},{"name":"release-evidence.json","size":1},{"name":"release-evidence.json.sha256","size":1},{"name":"unexpected.bin","size":1}]}'
+                ;;
+              *) exit 2 ;;
+            esac
+          }
+
+          case "$action" in
+            view)
+              metadata
+              ;;
+            upload)
+              [ "$state" = base ]
+              for arg in "$@"; do
+                [ "$arg" != --clobber ] || { echo 'clobber forbidden' >&2; exit 1; }
+              done
+              cp /tmp/release-audit.json /tmp/m124-release/release-audit.json
+              cp /tmp/release-audit.json.sha256 /tmp/m124-release/release-audit.json.sha256
+              cp /tmp/release-audit.bundle.json /tmp/m124-release/release-audit.bundle.json
+              printf '%s\n' full > /tmp/m124-state
+              count=$(cat /tmp/m124-uploads)
+              printf '%s\n' "$((count + 1))" > /tmp/m124-uploads
+              ;;
+            download)
+              dir=''
+              while [ "$#" -gt 0 ]; do
+                if [ "$1" = --dir ]; then
+                  shift
+                  dir=$1
+                fi
+                shift || true
+              done
+              test -n "$dir"
+              cp /tmp/m124-release/release-audit.json "$dir/"
+              cp /tmp/m124-release/release-audit.json.sha256 "$dir/"
+              cp /tmp/m124-release/release-audit.bundle.json "$dir/"
+              ;;
+            *) exit 2 ;;
+          esac
+          EOF
+
+          chmod +x /tmp/m124-bin/cosign /tmp/m124-bin/gh
+
+      - name: Qualify first durable publication without overwrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATH="/tmp/m124-bin:$PATH" GITHUB_REPOSITORY=Ploos-AS/gamja \
+            ./scripts/retain-audit-record.sh v1.2.3 /tmp/release-audit.json /tmp/release-audit.json.sha256
+          test "$(cat /tmp/m124-state)" = full
+          test "$(cat /tmp/m124-uploads)" = 1
+          test -s /tmp/release-audit.bundle.json
+          cmp /tmp/release-audit.json /tmp/m124-release/release-audit.json
+          cmp /tmp/release-audit.json.sha256 /tmp/m124-release/release-audit.json.sha256
+
+      - name: Qualify idempotent reuse of durable signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/release-audit.bundle.json
+          PATH="/tmp/m124-bin:$PATH" GITHUB_REPOSITORY=Ploos-AS/gamja \
+            ./scripts/retain-audit-record.sh v1.2.3 /tmp/release-audit.json /tmp/release-audit.json.sha256
+          test "$(cat /tmp/m124-uploads)" = 1
+          cmp /tmp/release-audit.bundle.json /tmp/m124-release/release-audit.bundle.json
+
+      - name: Reject deterministic audit drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/release-audit.json /tmp/release-audit.good.json
+          cp /tmp/release-audit.json.sha256 /tmp/release-audit.good.json.sha256
+          jq '.image.name = "ghcr.io/ploos-as/other"' /tmp/release-audit.good.json > /tmp/release-audit.json
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          if PATH="/tmp/m124-bin:$PATH" GITHUB_REPOSITORY=Ploos-AS/gamja \
+            ./scripts/retain-audit-record.sh v1.2.3 /tmp/release-audit.json /tmp/release-audit.json.sha256 >/dev/null 2>&1; then
+            echo 'M1.24 accepted deterministic audit drift against durable assets' >&2
+            exit 1
+          fi
+          mv /tmp/release-audit.good.json /tmp/release-audit.json
+          mv /tmp/release-audit.good.json.sha256 /tmp/release-audit.json.sha256
+
+      - name: Reject partial and unexpected release asset states
+        shell: bash
+        run: |
+          set -euo pipefail
+          for state in partial extra; do
+            if PATH="/tmp/m124-bin:$PATH" M124_FORCE_STATE="$state" GITHUB_REPOSITORY=Ploos-AS/gamja \
+              ./scripts/retain-audit-record.sh v1.2.3 /tmp/release-audit.json /tmp/release-audit.json.sha256 >/dev/null 2>&1; then
+              echo "M1.24 accepted forbidden release asset state: $state" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify production M1.24 wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'contents: write' .github/workflows/release-verification.yml
+          grep -Fq './scripts/retain-audit-record.sh' .github/workflows/release-verification.yml
+          grep -Fq 'gh release upload' scripts/retain-audit-record.sh
+          ! grep -Fq -- '--clobber' scripts/retain-audit-record.sh
+          grep -Fq 'cmp "$record" "$archive_dir/release-audit.json"' scripts/retain-audit-record.sh
+          grep -Fq 'cmp "$checksum" "$archive_dir/release-audit.json.sha256"' scripts/retain-audit-record.sh
+          grep -Fq 'retention-days: 90' .github/workflows/release-verification.yml
+          grep -Fq 'M1.24' RELEASE-AUDIT.md
+
+      - name: Record M1.24 policy
+        run: |
+          {
+            echo '### M1.24 durable audit-retention qualification'
+            echo
+            echo '- first successful audit transitions exactly from three evidence assets to six evidence+audit assets'
+            echo '- publication never uses clobber/overwrite semantics'
+            echo '- later audits reproduce JSON/checksum byte-for-byte and reuse the durable M1.23 bundle'
+            echo '- partial and unrelated extra asset states are rejected'
+            echo '- GitHub Release assets provide durable retention; the 90-day Actions artifact is secondary cache only'
+          } >> "$GITHUB_STEP_SUMMARY"
