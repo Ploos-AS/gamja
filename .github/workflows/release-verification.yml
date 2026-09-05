@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
   packages: read
+  id-token: write
 
 jobs:
   verify:
@@ -80,7 +81,27 @@ jobs:
           (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
           ./scripts/verify-audit-record.sh /tmp/release-audit.json /tmp/release-audit.json.sha256
 
-      - name: Archive M1.22 verified audit record
+      - name: Sign M1.23 audit record
+        if: steps.meta.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle /tmp/release-audit.bundle.json \
+            /tmp/release-audit.json >/dev/null
+          test -s /tmp/release-audit.bundle.json
+
+      - name: Verify M1.23 signed audit record
+        if: steps.meta.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/verify-audit-record.sh \
+            /tmp/release-audit.json \
+            /tmp/release-audit.json.sha256 \
+            /tmp/release-audit.bundle.json
+
+      - name: Archive M1.23 signed audit record
         id: audit_artifact
         if: steps.meta.outputs.eligible == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7, Node 24
@@ -89,11 +110,12 @@ jobs:
           path: |
             /tmp/release-audit.json
             /tmp/release-audit.json.sha256
+            /tmp/release-audit.bundle.json
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
 
-      - name: Record M1.22 audit
+      - name: Record M1.23 audit
         if: steps.meta.outputs.eligible == 'true'
         env:
           TAG: ${{ steps.meta.outputs.tag }}
@@ -101,7 +123,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.audit_artifact.outputs.artifact-url }}
         run: |
           {
-            echo "### M1.22 post-release audit"
+            echo "### M1.23 post-release audit"
             echo
             echo "- release: $TAG"
             echo "- GitHub Release is non-draft and tag identity matches"
@@ -112,7 +134,9 @@ jobs:
             echo "- amd64/arm64 SPDX SBOM and BuildKit SLSA provenance verified"
             echo "- recorded amd64/arm64 runtime qualification verified"
             echo "- deterministic M1.21 audit record generated"
-            echo "- canonical M1.22 consumer verified checksum, closed schema and all claims before archival"
+            echo "- canonical M1.22 consumer verified checksum, closed schema and all claims"
+            echo "- exact audit-record bytes keylessly signed by release-verification.yml via GitHub OIDC"
+            echo "- M1.23 Cosign bundle verified before archival"
             echo "- immutable Actions artifact digest: $ARTIFACT_DIGEST"
             echo "- audit artifact: $ARTIFACT_URL"
           } >> "$GITHUB_STEP_SUMMARY"
