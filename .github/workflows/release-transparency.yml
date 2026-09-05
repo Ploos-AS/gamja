@@ -7,12 +7,16 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '41 6 * * *'
+  workflow_run:
+    workflows: ["release-verification"]
+    types: [completed]
 
 permissions:
   contents: read
 
 jobs:
   qualify:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, Node 24
@@ -61,9 +65,8 @@ jobs:
           jq -e '.releases | map(.tag) == ["v1.0.0","v1.0.1"]' /tmp/m125-index.json >/dev/null
           jq -e 'all(.releases[]; ([.evidence.json.sha256,.evidence.checksum.sha256,.evidence.bundle.sha256,.audit.json.sha256,.audit.checksum.sha256,.audit.bundle.sha256] | all(test("^[0-9a-f]{64}$"))))' /tmp/m125-index.json >/dev/null
 
-          cp /tmp/m125-index.json /tmp/m125-tampered.json
-          jq '.releases[0].digest="sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"' /tmp/m125-tampered.json > /tmp/m125-tampered-2.json
-          if scripts/verify-release-index.sh /tmp/m125-tampered-2.json "$root" >/dev/null 2>&1; then
+          jq '.releases[0].digest="sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"' /tmp/m125-index.json > /tmp/m125-tampered.json
+          if scripts/verify-release-index.sh /tmp/m125-tampered.json "$root" >/dev/null 2>&1; then
             echo 'tampered digest unexpectedly accepted' >&2
             exit 1
           fi
