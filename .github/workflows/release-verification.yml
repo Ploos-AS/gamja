@@ -70,19 +70,39 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
+          AUDIT_RECORD_OUT: /tmp/release-audit.json
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x ./scripts/audit-release.sh ./scripts/verify-release.sh ./scripts/verify-attestations.sh ./scripts/validate-release-tag.sh
+          chmod +x ./scripts/audit-release.sh ./scripts/create-audit-record.sh ./scripts/verify-release.sh ./scripts/verify-attestations.sh ./scripts/validate-release-tag.sh
           ./scripts/audit-release.sh "$TAG"
+          test -s "$AUDIT_RECORD_OUT"
+          (cd /tmp && sha256sum release-audit.json > release-audit.json.sha256)
+          sha256sum -c /tmp/release-audit.json.sha256
+          jq -e --arg tag "$TAG" '.milestone == "M1.21" and .release.tag == $tag and (.verification | to_entries | all(.value == true))' "$AUDIT_RECORD_OUT" >/dev/null
 
-      - name: Record M1.20 audit
+      - name: Archive M1.21 audit record
+        id: audit_artifact
+        if: steps.meta.outputs.eligible == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7, Node 24
+        with:
+          name: release-audit-${{ steps.meta.outputs.tag }}-${{ github.run_id }}
+          path: |
+            /tmp/release-audit.json
+            /tmp/release-audit.json.sha256
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: Record M1.21 audit
         if: steps.meta.outputs.eligible == 'true'
         env:
           TAG: ${{ steps.meta.outputs.tag }}
+          ARTIFACT_DIGEST: ${{ steps.audit_artifact.outputs.artifact-digest }}
+          ARTIFACT_URL: ${{ steps.audit_artifact.outputs.artifact-url }}
         run: |
           {
-            echo "### M1.20 post-release audit"
+            echo "### M1.21 post-release audit"
             echo
             echo "- release: $TAG"
             echo "- GitHub Release is non-draft and tag identity matches"
@@ -92,4 +112,7 @@ jobs:
             echo "- exact OCI revision and image Cosign identity verified"
             echo "- amd64/arm64 SPDX SBOM and BuildKit SLSA provenance verified"
             echo "- recorded amd64/arm64 runtime qualification verified"
+            echo "- deterministic M1.21 audit record generated and SHA-256 checked"
+            echo "- immutable Actions artifact digest: $ARTIFACT_DIGEST"
+            echo "- audit artifact: $ARTIFACT_URL"
           } >> "$GITHUB_STEP_SUMMARY"
