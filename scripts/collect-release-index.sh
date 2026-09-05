@@ -65,5 +65,5 @@ EOF
     done
   done
 
-"$script_dir/create-release-index.sh" "$root" "$out"
-"$script_dir/verify-release-index.sh" "$out" "$root"
+sh "$script_dir/create-release-index.sh" "$root" "$out"
+sh "$script_dir/verify-release-index.sh" "$out" "$root"
